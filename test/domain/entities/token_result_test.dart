@@ -259,7 +259,10 @@ void main() {
       });
 
       test('should implement TokenError.toString() correctly', () {
-        final error = TokenError(error: 'invalid_grant', errorDescription: 'Code expired');
+        final error = TokenError(
+          error: 'invalid_grant',
+          errorDescription: 'Code expired',
+        );
         expect(error.toString(), contains('invalid_grant'));
         expect(error.toString(), contains('Code expired'));
       });

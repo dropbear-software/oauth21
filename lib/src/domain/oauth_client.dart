@@ -126,7 +126,9 @@ class OAuthClient {
     if (clientSecret != null) {
       final encodedClientId = Uri.encodeQueryComponent(clientId);
       final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
-      final credentials = base64.encode(utf8.encode('$encodedClientId:$encodedClientSecret'));
+      final credentials = base64.encode(
+        utf8.encode('$encodedClientId:$encodedClientSecret'),
+      );
       headers['Authorization'] = 'Basic $credentials';
     }
 
@@ -148,6 +150,7 @@ class OAuthClient {
 class OAuthAuthenticatedClient extends http.BaseClient {
   final http.Client _inner;
   final String _accessToken;
+
   /// The token type scheme prefix to use in the Authorization header (e.g., Bearer, DPoP).
   final String tokenType;
 
