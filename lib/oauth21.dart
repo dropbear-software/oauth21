@@ -1,8 +1,11 @@
-/// Support for doing something awesome.
-///
-/// More dartdocs go here.
+/// A secure, pure Dart client implementation of the OAuth 2.1 Authorization Framework.
 library;
 
-export 'src/oauth21_base.dart';
-
-// TODO: Export any libraries intended for clients of this package.
+export 'src/adapters/http_adapter.dart';
+export 'src/domain/entities/auth_request.dart';
+export 'src/domain/entities/token_result.dart';
+export 'src/domain/oauth_client.dart';
+export 'src/domain/ports/oauth_http_client.dart';
+export 'src/domain/ports/oauth_req_parser.dart';
+export 'src/domain/value_objects/code_challenge.dart';
+export 'src/domain/value_objects/code_verifier.dart';
