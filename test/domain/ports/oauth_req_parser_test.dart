@@ -99,6 +99,26 @@ void main() {
         },
       );
 
+      test('should reject redirect URI if code contains non-VSCHAR characters', () {
+        final malformedUri = Uri.parse(
+          'https://client.example.com/callback?code=code\nbreak', // Newline injection
+        );
+        expect(
+          () => parser.parseRedirect(malformedUri),
+          throwsFormatException,
+        );
+      });
+
+      test('should reject redirect URI if error_description contains non-NQSCHAR characters', () {
+        final malformedUri = Uri.parse(
+          'https://client.example.com/callback?error=invalid_request&error_description=some\\backslash', // Forbidden backslash
+        );
+        expect(
+          () => parser.parseRedirect(malformedUri),
+          throwsFormatException,
+        );
+      });
+
       test('should treat empty value query parameters as completely omitted', () {
         final emptyStateUri = Uri.parse(
           'https://client.example.com/callback?code=splat-code&state=', // Empty value field

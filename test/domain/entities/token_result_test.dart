@@ -257,6 +257,12 @@ void main() {
         expect(success.toString(), contains('accessToken: ***'));
         expect(success.toString(), isNot(contains('super-secret-token')));
       });
+
+      test('should implement TokenError.toString() correctly', () {
+        final error = TokenError(error: 'invalid_grant', errorDescription: 'Code expired');
+        expect(error.toString(), contains('invalid_grant'));
+        expect(error.toString(), contains('Code expired'));
+      });
     });
   });
 }

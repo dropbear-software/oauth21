@@ -137,6 +137,22 @@ void main() {
     );
 
     test(
+      'should reject if existing endpoint contains standard parameter response_type',
+      () {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: '$authEndpoint?response_type=code',
+            clientId: clientId,
+            redirectUri: redirectUri,
+            state: stateToken,
+            codeChallenge: codeChallenge,
+          ),
+          throwsArgumentError,
+        );
+      },
+    );
+
+    test(
       'should reject if custom parameters collide with existing endpoint parameters',
       () {
         expect(

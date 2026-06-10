@@ -5,6 +5,7 @@ import 'package:oauth21/src/domain/entities/token_result.dart';
 import 'package:oauth21/src/domain/oauth_client.dart';
 import 'package:oauth21/src/domain/ports/oauth_http_client.dart';
 import 'package:oauth21/src/domain/ports/oauth_req_parser.dart';
+import 'package:oauth21/src/domain/value_objects/code_challenge.dart';
 import 'package:oauth21/src/domain/value_objects/code_verifier.dart';
 import 'package:test/test.dart';
 
@@ -34,6 +35,34 @@ void main() {
     const tokenEndpoint = 'https://auth.example.com/token';
     const clientId = 'client-123';
     const stateToken = 'state-xyz';
+
+    group('createAuthorizationRequest', () {
+      test('should build a valid AuthRequest with correct parameters', () {
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: clientId,
+          httpClient: MockOAuthHttpClient(
+            (u, h, b) async => const OAuthHttpResponse(statusCode: 200, body: '', headers: {}),
+          ),
+        );
+        final verifier = CodeVerifier.generate();
+        final challenge = CodeChallenge.s256(verifier);
+        final request = client.createAuthorizationRequest(
+          redirectUri: Uri.parse('https://client.example.com/callback'),
+          state: stateToken,
+          codeChallenge: challenge,
+          scope: 'read write',
+        );
+
+        expect(request.authorizationEndpoint, equals(authEndpoint));
+        expect(request.clientId, equals(clientId));
+        expect(request.redirectUri, equals(Uri.parse('https://client.example.com/callback')));
+        expect(request.state, equals(stateToken));
+        expect(request.codeChallenge, equals(challenge));
+        expect(request.scope, equals('read write'));
+      });
+    });
 
     group('validateCallback', () {
       final clientNoIssuer = OAuthClient(
