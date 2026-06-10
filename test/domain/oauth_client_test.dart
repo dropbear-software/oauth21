@@ -247,6 +247,33 @@ void main() {
           expect(result, isA<TokenSuccess>());
         },
       );
+
+      test('should strictly form-encode client ID and secret separately before generating Basic auth token', () async {
+        final httpClient = MockOAuthHttpClient((url, headers, body) async {
+          // client ID: 'client:id' -> 'client%3Aid'
+          // client secret: 'sec&ret' -> 'sec%26ret'
+          // Joined: 'client%3Aid:sec%26ret' -> Base64 encoded
+          expect(
+            headers['Authorization'],
+            equals('Basic Y2xpZW50JTNBaWQ6c2VjJTI2cmV0'),
+          );
+          return const OAuthHttpResponse(
+            statusCode: 200,
+            body: '{"access_token":"t1","token_type":"Bearer"}',
+            headers: {'Cache-Control': 'no-store'},
+          );
+        });
+
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: 'client:id',
+          clientSecret: 'sec&ret',
+          httpClient: httpClient,
+        );
+
+        await client.exchangeCode(code: 'auth-code', codeVerifier: codeVerifier);
+      });
     });
   });
 
@@ -263,6 +290,18 @@ void main() {
       final response = await authClient.get(
         Uri.parse('https://api.example.com/user'),
       );
+      expect(response.statusCode, equals(200));
+    });
+
+    test('should dynamically append the correct token type scheme prefix to the authorization header', () async {
+      final mockInner = MockClient((request) async {
+        expect(request.headers['Authorization'], equals('DPoP dynamic-token-123'));
+        return http.Response('OK', 200);
+      });
+
+      // Pass 'DPoP' as the explicit token type configuration
+      final authClient = OAuthAuthenticatedClient(mockInner, 'dynamic-token-123', tokenType: 'DPoP');
+      final response = await authClient.get(Uri.parse('https://api.example.com/user'));
       expect(response.statusCode, equals(200));
     });
 
@@ -284,6 +323,18 @@ void main() {
       expect(
         () => authClient.get(
           Uri.parse('https://api.example.com/user?token=$token'),
+        ),
+        throwsStateError,
+      );
+    });
+
+    test('should reject request if the sensitive token value is leaked inside any query parameter value', () {
+      final mockInner = MockClient((request) async => http.Response('OK', 200));
+      final authClient = OAuthAuthenticatedClient(mockInner, 'secret-token-val');
+
+      expect(
+        () => authClient.get(
+          Uri.parse('https://api.example.com/user?custom_key=secret-token-val'), // Custom parameter leaking value
         ),
         throwsStateError,
       );

@@ -124,7 +124,9 @@ class OAuthClient {
 
     final headers = <String, String>{};
     if (clientSecret != null) {
-      final credentials = base64.encode(utf8.encode('$clientId:$clientSecret'));
+      final encodedClientId = Uri.encodeQueryComponent(clientId);
+      final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
+      final credentials = base64.encode(utf8.encode('$encodedClientId:$encodedClientSecret'));
       headers['Authorization'] = 'Basic $credentials';
     }
 
@@ -146,14 +148,15 @@ class OAuthClient {
 class OAuthAuthenticatedClient extends http.BaseClient {
   final http.Client _inner;
   final String _accessToken;
-  final String _tokenType;
+  /// The token type scheme prefix to use in the Authorization header (e.g., Bearer, DPoP).
+  final String tokenType;
 
   /// Creates a new [OAuthAuthenticatedClient] wrapping the [_inner] HTTP client.
   OAuthAuthenticatedClient(
     this._inner,
-    this._accessToken, [
-    this._tokenType = 'Bearer',
-  ]);
+    this._accessToken, {
+    this.tokenType = 'Bearer',
+  });
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
@@ -161,18 +164,20 @@ class OAuthAuthenticatedClient extends http.BaseClient {
     // "Under no circumstances may an access token be appended to a query parameter string.
     // If a URL format contains a token query string, the library must reject the resource request execution loop."
     final url = request.url;
-    for (final value in url.queryParameters.values) {
-      if (value == _accessToken) {
-        throw StateError(
-          'Security violation: Access token must never be appended to a query parameter string. '
-          'Resource request execution loop rejected.',
-        );
+    for (final values in url.queryParametersAll.values) {
+      for (final val in values) {
+        if (val.contains(_accessToken)) {
+          throw StateError(
+            'Security violation: Access token must never be appended to a query parameter string. '
+            'Resource request execution loop rejected.',
+          );
+        }
       }
     }
 
     // 2. Enforce Bearer / Token Type Format:
     // Pass tokens strictly via the HTTP Authorization request header utilizing the correct scheme.
-    request.headers['Authorization'] = '$_tokenType $_accessToken';
+    request.headers['Authorization'] = '$tokenType $_accessToken';
 
     return _inner.send(request);
   }
