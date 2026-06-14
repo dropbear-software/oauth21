@@ -2,6 +2,7 @@
 library;
 
 export 'src/adapters/http_adapter.dart';
+export 'src/adapters/shelf_adapter.dart';
 export 'src/domain/entities/access_token.dart';
 export 'src/domain/entities/auth_code.dart';
 export 'src/domain/entities/auth_request.dart';

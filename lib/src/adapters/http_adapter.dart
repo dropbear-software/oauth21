@@ -14,20 +14,30 @@ class HttpAdapter implements OAuthHttpClient {
     required Map<String, String> body,
     Map<String, String> headers = const {},
   }) async {
-    if (!url.isScheme('https')) {
+    // 1. Resolve compliance-safe TLS boundaries (Allow loopback HTTP exceptions)
+    final hostLower = url.host.toLowerCase();
+    final isLoopback =
+        hostLower == 'localhost' ||
+        hostLower == '127.0.0.1' ||
+        hostLower == '::1' ||
+        hostLower == '[::1]';
+
+    if (url.scheme != 'https' && !isLoopback) {
       throw ArgumentError(
-        'Security violation: Token endpoint must use HTTPS channel security. Got "$url".',
+        'Security violation: Token endpoint must use HTTPS channel security. '
+        'Got "$url".',
       );
     }
 
-    final mergedHeaders = Map<String, String>.from(headers);
+    // 2. Prevent Case-Sensitive Header Duplication via downcased normalization
+    final mergedHeaders = <String, String>{};
+    headers.forEach((key, value) {
+      mergedHeaders[key.toLowerCase()] = value;
+    });
 
-    // Automatically set the Content-Type header to form-urlencoded if not specified.
-    final hasContentType = mergedHeaders.keys.any(
-      (k) => k.toLowerCase() == 'content-type',
-    );
-    if (!hasContentType) {
-      mergedHeaders['Content-Type'] = 'application/x-www-form-urlencoded';
+    // Ensure downcased Content-Type is bounded properly
+    if (!mergedHeaders.containsKey('content-type')) {
+      mergedHeaders['content-type'] = 'application/x-www-form-urlencoded';
     }
 
     final response = await _client.post(

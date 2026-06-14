@@ -102,5 +102,60 @@ void main() {
         expect(response.headers['Cache-Control'], equals('no-store'));
       },
     );
+
+    test('should permit unencrypted cleartext HTTP exclusively on local '
+        'loopback host environments', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response('{"access_token":"loopback-token"}', 200);
+      });
+
+      final adapter = HttpAdapter(mockClient);
+
+      // Localhost, 127.0.0.1, and [::1] loopbacks over HTTP should succeed
+      final resLocalhost = await adapter.post(
+        Uri.parse('http://localhost/token'),
+        body: {'code': '123'},
+      );
+      final resIp = await adapter.post(
+        Uri.parse('http://127.0.0.1/token'),
+        body: {'code': '123'},
+      );
+      final resIp6 = await adapter.post(
+        Uri.parse('http://[::1]/token'),
+        body: {'code': '123'},
+      );
+
+      expect(resLocalhost.statusCode, equals(200));
+      expect(resIp.statusCode, equals(200));
+      expect(resIp6.statusCode, equals(200));
+    });
+
+    test('should merge and normalize varied-case header keys to prevent '
+        'duplication exploits', () async {
+      final mockClient = MockClient((request) async {
+        // Verify that lowercase 'authorization' key absorbed the target
+        expect(
+          request.headers['authorization'],
+          equals('Basic overridden-value'),
+        );
+        // Confirm no secondary duplicate variant leaked through the map
+        expect(
+          request.headers.keys.toList().contains('Authorization'),
+          isFalse,
+        );
+
+        return http.Response('{}', 200);
+      });
+
+      final adapter = HttpAdapter(mockClient);
+      await adapter.post(
+        Uri.parse('https://example.com/token'),
+        headers: {
+          'Authorization': 'Basic original-value',
+          'authorization': 'Basic overridden-value', // Varied case entry
+        },
+        body: {'code': '123'},
+      );
+    });
   });
 }
