@@ -58,6 +58,20 @@ void main() {
       );
     });
 
+    test('should reject relative redirect URI', () {
+      final relativeRedirect = Uri.parse('/callback');
+      expect(
+        () => AuthRequest(
+          authorizationEndpoint: authEndpoint,
+          clientId: clientId,
+          redirectUri: relativeRedirect,
+          state: stateToken,
+          codeChallenge: codeChallenge,
+        ),
+        throwsArgumentError,
+      );
+    });
+
     test(
       'should reject custom parameters that collide with standard parameters',
       () {
