@@ -142,6 +142,36 @@ class OAuthClient {
       headers: response.headers,
     );
   }
+
+  /// Exchanges a [refreshToken] for a new set of tokens via back-channel POST.
+  Future<TokenResult> exchangeRefreshToken(String refreshToken) async {
+    final body = {
+      'grant_type': 'refresh_token',
+      'refresh_token': refreshToken,
+      'client_id': clientId,
+    };
+
+    final headers = <String, String>{};
+    if (clientSecret != null) {
+      final encodedClientId = Uri.encodeQueryComponent(clientId);
+      final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
+      final credentials = base64.encode(
+        utf8.encode('$encodedClientId:$encodedClientSecret'),
+      );
+      headers['Authorization'] = 'Basic $credentials';
+    }
+
+    final response = await httpClient.post(
+      Uri.parse(tokenEndpoint),
+      headers: headers,
+      body: body,
+    );
+
+    return TokenResult.fromResponse(
+      body: response.body,
+      headers: response.headers,
+    );
+  }
 }
 
 /// An HTTP client wrapper that automatically appends the Bearer token to requests

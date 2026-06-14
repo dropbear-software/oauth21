@@ -140,5 +140,46 @@ void main() {
         );
       },
     );
+
+    test('exchanges refresh token for new access token', () async {
+      final mockHttpClient = HttpAdapter(
+        MockClient((request) async {
+          expect(request.url.toString(), equals(tokenEndpoint));
+          expect(request.method, equals('POST'));
+          expect(
+            request.headers['Authorization'],
+            equals('Basic bXktY2xpZW50LWlkOm15LWNsaWVudC1zZWNyZXQ='),
+          );
+
+          final bodyParams = request.bodyFields;
+          expect(bodyParams['grant_type'], equals('refresh_token'));
+          expect(bodyParams['refresh_token'], equals('old-refresh-token-123'));
+          expect(bodyParams['client_id'], equals(clientId));
+
+          return http.Response(
+            '{"access_token": "new-access-token", "token_type": "Bearer", '
+            '"expires_in": 3600, "refresh_token": "new-refresh-token"}',
+            200,
+            headers: {'Cache-Control': 'no-store'},
+          );
+        }),
+      );
+
+      final oauthClient = OAuthClient(
+        authorizationEndpoint: authEndpoint,
+        tokenEndpoint: tokenEndpoint,
+        clientId: clientId,
+        clientSecret: clientSecret,
+        httpClient: mockHttpClient,
+      );
+
+      final result = await oauthClient.exchangeRefreshToken(
+        'old-refresh-token-123',
+      );
+      expect(result, isA<TokenSuccess>());
+      final success = result as TokenSuccess;
+      expect(success.accessToken, equals('new-access-token'));
+      expect(success.refreshToken, equals('new-refresh-token'));
+    });
   });
 }
