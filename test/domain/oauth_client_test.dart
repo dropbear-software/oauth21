@@ -224,10 +224,10 @@ void main() {
         },
       );
 
-      test('should send redirect_uri fallback if explicitly passed', () async {
-        final fallbackUri = Uri.parse('https://client.example.com/callback');
+      test('should send redirect_uri if explicitly passed', () async {
+        final redirectUri = Uri.parse('https://client.example.com/callback');
         final httpClient = MockOAuthHttpClient((url, headers, body) async {
-          expect(body['redirect_uri'], equals(fallbackUri.toString()));
+          expect(body['redirect_uri'], equals(redirectUri.toString()));
           return const OAuthHttpResponse(
             statusCode: 200,
             body: '{"access_token": "token123", "token_type": "Bearer"}',
@@ -245,7 +245,7 @@ void main() {
         final result = await client.exchangeCode(
           code: 'auth-code',
           codeVerifier: codeVerifier,
-          redirectUriFallback: fallbackUri,
+          redirectUri: redirectUri,
         );
         expect(result, isA<TokenSuccess>());
       });

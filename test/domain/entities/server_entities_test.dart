@@ -52,9 +52,7 @@ void main() {
               clientId: 'client-123',
               clientType: ClientType.confidential,
               clientSecretHash: 'hash',
-              redirectUris: {
-                Uri.parse('https://example.com/cb#token'),
-              },
+              redirectUris: {Uri.parse('https://example.com/cb#token')},
               allowedScopes: {'read'},
             ),
             throwsArgumentError,
@@ -62,65 +60,74 @@ void main() {
         },
       );
 
-      test('should enforce strict immutability on configuration collections', () {
-        final client = ClientRegistration(
-          clientId: 'client-123',
-          clientType: ClientType.confidential,
-          clientSecretHash: 'hash',
-          redirectUris: {Uri.parse('https://example.com/cb')},
-          allowedScopes: {'read'},
-        );
-
-        expect(
-          () => client.allowedScopes.add('write'),
-          throwsUnsupportedError,
-        );
-        expect(
-          () => client.redirectUris.add(Uri.parse('https://attack.com')),
-          throwsUnsupportedError,
-        );
-        expect(
-          () => client.allowedGrantTypes.add('implicit'),
-          throwsUnsupportedError,
-        );
-      });
-
-      test('should reject clientId containing invalid non-VSCHAR control characters', () {
-        expect(
-          () => ClientRegistration(
-            clientId: 'client\nid', // Contains a newline character
+      test(
+        'should enforce strict immutability on configuration collections',
+        () {
+          final client = ClientRegistration(
+            clientId: 'client-123',
             clientType: ClientType.confidential,
             clientSecretHash: 'hash',
             redirectUris: {Uri.parse('https://example.com/cb')},
             allowedScopes: {'read'},
-          ),
-          throwsArgumentError,
-        );
-      });
+          );
 
-      test('should reject allowedScopes containing individual tokens that violate ABNF character rules', () {
-        expect(
-          () => ClientRegistration(
-            clientId: 'client-123',
-            clientType: ClientType.confidential,
-            clientSecretHash: 'hash',
-            redirectUris: {Uri.parse('https://example.com/cb')},
-            allowedScopes: {'read', 'write"scope'}, // Illegal double quote
-          ),
-          throwsArgumentError,
-        );
+          expect(
+            () => client.allowedScopes.add('write'),
+            throwsUnsupportedError,
+          );
+          expect(
+            () => client.redirectUris.add(Uri.parse('https://attack.com')),
+            throwsUnsupportedError,
+          );
+          expect(
+            () => client.allowedGrantTypes.add('implicit'),
+            throwsUnsupportedError,
+          );
+        },
+      );
 
-        expect(
-          () => ClientRegistration(
-            clientId: 'client-123',
-            clientType: ClientType.confidential,
-            clientSecretHash: 'hash',
-            redirectUris: {Uri.parse('https://example.com/cb')},
-            allowedScopes: {'read', r'read\write'}, // Illegal backslash
-          ),
-          throwsArgumentError,
-        );
-      });
+      test(
+        'should reject clientId containing invalid non-VSCHAR control characters',
+        () {
+          expect(
+            () => ClientRegistration(
+              clientId: 'client\nid', // Contains a newline character
+              clientType: ClientType.confidential,
+              clientSecretHash: 'hash',
+              redirectUris: {Uri.parse('https://example.com/cb')},
+              allowedScopes: {'read'},
+            ),
+            throwsArgumentError,
+          );
+        },
+      );
+
+      test(
+        'should reject allowedScopes containing individual tokens that violate ABNF character rules',
+        () {
+          expect(
+            () => ClientRegistration(
+              clientId: 'client-123',
+              clientType: ClientType.confidential,
+              clientSecretHash: 'hash',
+              redirectUris: {Uri.parse('https://example.com/cb')},
+              allowedScopes: {'read', 'write"scope'}, // Illegal double quote
+            ),
+            throwsArgumentError,
+          );
+
+          expect(
+            () => ClientRegistration(
+              clientId: 'client-123',
+              clientType: ClientType.confidential,
+              clientSecretHash: 'hash',
+              redirectUris: {Uri.parse('https://example.com/cb')},
+              allowedScopes: {'read', r'read\write'}, // Illegal backslash
+            ),
+            throwsArgumentError,
+          );
+        },
+      );
 
       test('should reject empty or pure whitespace clientId strings', () {
         expect(
@@ -189,20 +196,23 @@ void main() {
         expect(expiredCode.isExpired, isTrue);
       });
 
-      test('should reject auth code if the code string contains invalid non-VSCHAR characters', () {
-        expect(
-          () => AuthCode(
-            code: 'malformed\ncode', // Newline injection
-            clientId: 'client-1',
-            redirectUri: Uri.parse('https://example.com/cb'),
-            userId: 'user-1',
-            codeChallenge: 'challenge-1',
-            codeChallengeMethod: 'S256',
-            expiresAt: future,
-          ),
-          throwsArgumentError,
-        );
-      });
+      test(
+        'should reject auth code if the code string contains invalid non-VSCHAR characters',
+        () {
+          expect(
+            () => AuthCode(
+              code: 'malformed\ncode', // Newline injection
+              clientId: 'client-1',
+              redirectUri: Uri.parse('https://example.com/cb'),
+              userId: 'user-1',
+              codeChallenge: 'challenge-1',
+              codeChallengeMethod: 'S256',
+              expiresAt: future,
+            ),
+            throwsArgumentError,
+          );
+        },
+      );
 
       test('should reject empty or pure whitespace auth code strings', () {
         expect(
@@ -315,31 +325,37 @@ void main() {
         expect(unchanged.userId, equals(original.userId));
         expect(unchanged.scope, equals(original.scope));
         expect(unchanged.codeChallenge, equals(original.codeChallenge));
-        expect(unchanged.codeChallengeMethod, equals(original.codeChallengeMethod));
+        expect(
+          unchanged.codeChallengeMethod,
+          equals(original.codeChallengeMethod),
+        );
         expect(unchanged.expiresAt, equals(original.expiresAt));
         expect(unchanged.isUsed, equals(original.isUsed));
         expect(unchanged.issuedTokenIds, equals(original.issuedTokenIds));
       });
 
-      test('should evaluate overall lifecycle validity combined with usage flags', () {
-        final original = AuthCode(
-          code: 'code-1',
-          clientId: 'client-1',
-          redirectUri: Uri.parse('https://example.com/cb'),
-          userId: 'user-1',
-          codeChallenge: 'challenge-1',
-          codeChallengeMethod: 'S256',
-          expiresAt: future,
-        );
+      test(
+        'should evaluate overall lifecycle validity combined with usage flags',
+        () {
+          final original = AuthCode(
+            code: 'code-1',
+            clientId: 'client-1',
+            redirectUri: Uri.parse('https://example.com/cb'),
+            userId: 'user-1',
+            codeChallenge: 'challenge-1',
+            codeChallengeMethod: 'S256',
+            expiresAt: future,
+          );
 
-        expect(original.isValid, isTrue);
+          expect(original.isValid, isTrue);
 
-        final usedCode = original.copyWith(isUsed: true);
-        expect(usedCode.isValid, isFalse);
+          final usedCode = original.copyWith(isUsed: true);
+          expect(usedCode.isValid, isFalse);
 
-        final expiredCode = original.copyWith(expiresAt: past);
-        expect(expiredCode.isValid, isFalse);
-      });
+          final expiredCode = original.copyWith(expiresAt: past);
+          expect(expiredCode.isValid, isFalse);
+        },
+      );
     });
 
     group('AccessToken', () {
@@ -385,21 +401,24 @@ void main() {
         expect(unchanged.isRevoked, equals(original.isRevoked));
       });
 
-      test('should evaluate overall lifecycle validity combined with revocation flags', () {
-        final original = AccessToken(
-          tokenHash: 'hash-1',
-          clientId: 'client-1',
-          expiresAt: future,
-        );
+      test(
+        'should evaluate overall lifecycle validity combined with revocation flags',
+        () {
+          final original = AccessToken(
+            tokenHash: 'hash-1',
+            clientId: 'client-1',
+            expiresAt: future,
+          );
 
-        expect(original.isValid, isTrue);
+          expect(original.isValid, isTrue);
 
-        final revokedToken = original.copyWith(isRevoked: true);
-        expect(revokedToken.isValid, isFalse);
+          final revokedToken = original.copyWith(isRevoked: true);
+          expect(revokedToken.isValid, isFalse);
 
-        final expiredToken = original.copyWith(expiresAt: past);
-        expect(expiredToken.isValid, isFalse);
-      });
+          final expiredToken = original.copyWith(expiresAt: past);
+          expect(expiredToken.isValid, isFalse);
+        },
+      );
     });
 
     group('RefreshToken', () {
@@ -443,23 +462,45 @@ void main() {
         expect(unchanged.scope, equals(original.scope));
         expect(unchanged.expiresAt, equals(original.expiresAt));
         expect(unchanged.isRevoked, equals(original.isRevoked));
+        expect(unchanged.revokedAt, equals(original.revokedAt));
+        expect(unchanged.usedInGraceWindow, equals(original.usedInGraceWindow));
       });
 
-      test('should evaluate overall lifecycle validity combined with revocation flags', () {
-        final original = RefreshToken(
+      test('should support grace window properties', () {
+        final now = DateTime.now();
+        final token = RefreshToken(
           tokenHash: 'hash-1',
           clientId: 'client-1',
           expiresAt: future,
+          revokedAt: now,
+          usedInGraceWindow: true,
         );
+        expect(token.revokedAt, equals(now));
+        expect(token.usedInGraceWindow, isTrue);
 
-        expect(original.isValid, isTrue);
-
-        final revokedToken = original.copyWith(isRevoked: true);
-        expect(revokedToken.isValid, isFalse);
-
-        final expiredToken = original.copyWith(expiresAt: past);
-        expect(expiredToken.isValid, isFalse);
+        final modified = token.copyWith(usedInGraceWindow: false);
+        expect(modified.usedInGraceWindow, isFalse);
+        expect(modified.revokedAt, equals(now));
       });
+
+      test(
+        'should evaluate overall lifecycle validity combined with revocation flags',
+        () {
+          final original = RefreshToken(
+            tokenHash: 'hash-1',
+            clientId: 'client-1',
+            expiresAt: future,
+          );
+
+          expect(original.isValid, isTrue);
+
+          final revokedToken = original.copyWith(isRevoked: true);
+          expect(revokedToken.isValid, isFalse);
+
+          final expiredToken = original.copyWith(expiresAt: past);
+          expect(expiredToken.isValid, isFalse);
+        },
+      );
     });
   });
 }

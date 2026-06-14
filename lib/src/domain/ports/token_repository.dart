@@ -24,4 +24,7 @@ abstract interface class TokenRepository {
 
   /// Revokes a refresh token by its SHA-256 hash.
   Future<void> revokeRefreshTokenByHash(String hashedValue);
+
+  /// Revokes all access and refresh tokens issued to the given client and user.
+  Future<void> revokeAllTokensForClientAndUser(String clientId, String? userId);
 }

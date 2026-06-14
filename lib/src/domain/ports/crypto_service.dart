@@ -14,4 +14,16 @@ abstract interface class CryptoService {
 
   /// Verifies a plain secret/password against its stored cryptographic hash.
   bool verifyPasswordHash(String plain, String hashed);
+
+  /// Constant-time comparison of two strings to prevent timing attacks.
+  static bool safeEquals(String a, String b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    var result = 0;
+    for (var i = 0; i < a.length; i++) {
+      result |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+    }
+    return result == 0;
+  }
 }

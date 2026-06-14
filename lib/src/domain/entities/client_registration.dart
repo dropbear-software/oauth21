@@ -38,9 +38,9 @@ class ClientRegistration {
     this.clientSecretHash,
     Set<String> allowedScopes = const {},
     Set<String> allowedGrantTypes = const {'authorization_code'},
-  })  : redirectUris = Set<Uri>.unmodifiable(redirectUris),
-        allowedScopes = Set<String>.unmodifiable(allowedScopes),
-        allowedGrantTypes = Set<String>.unmodifiable(allowedGrantTypes) {
+  }) : redirectUris = Set<Uri>.unmodifiable(redirectUris),
+       allowedScopes = Set<String>.unmodifiable(allowedScopes),
+       allowedGrantTypes = Set<String>.unmodifiable(allowedGrantTypes) {
     // 1. Validate clientId is non-empty, trimmed, and contains only VSCHAR
     final vscharRequiredRegex = RegExp(r'^[\x20-\x7E]+$');
     if (clientId.isEmpty ||

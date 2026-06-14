@@ -104,12 +104,11 @@ class OAuthClient {
 
   /// Exchanges the authorization [code] for access tokens via back-channel POST.
   ///
-  /// - Omits `redirect_uri` by default as PKCE makes it redundant.
-  /// - Accepts [redirectUriFallback] for backwards compatibility with legacy OAuth 2.0 servers.
+  /// - Accepts [redirectUri] if one was bound to the authorization code.
   Future<TokenResult> exchangeCode({
     required String code,
     required CodeVerifier codeVerifier,
-    Uri? redirectUriFallback,
+    Uri? redirectUri,
   }) async {
     final body = {
       'grant_type': 'authorization_code',
@@ -118,8 +117,8 @@ class OAuthClient {
       'client_id': clientId,
     };
 
-    if (redirectUriFallback != null) {
-      body['redirect_uri'] = redirectUriFallback.toString();
+    if (redirectUri != null) {
+      body['redirect_uri'] = redirectUri.toString();
     }
 
     final headers = <String, String>{};

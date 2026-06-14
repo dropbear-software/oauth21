@@ -69,8 +69,8 @@ void main() {
             expect(bodyParams['code'], equals(authCode));
             expect(bodyParams['code_verifier'], equals(verifier.value));
             expect(bodyParams['client_id'], equals(clientId));
-            // Redirect URI must be omitted from token request under OAuth 2.1 by default
-            expect(bodyParams.containsKey('redirect_uri'), isFalse);
+            // Redirect URI must be present in token request if bound to authorization code
+            expect(bodyParams['redirect_uri'], equals(redirectUri));
 
             return http.Response(
               '{"access_token": "secret-access-token-999", "token_type": "Bearer", "expires_in": 3600}',
@@ -100,6 +100,7 @@ void main() {
         final tokenResult = await oauthClient.exchangeCode(
           code: parsedParams.code!,
           codeVerifier: verifier,
+          redirectUri: Uri.parse(redirectUri),
         );
 
         expect(tokenResult, isA<TokenSuccess>());

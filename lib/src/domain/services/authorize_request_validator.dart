@@ -42,10 +42,10 @@ class AuthorizeValidationResult {
     required this.requestedScopes,
     required this.codeChallenge,
     required this.codeChallengeMethod,
-  })  : isValid = true,
-        isRedirectable = false,
-        errorCode = null,
-        errorDescription = null;
+  }) : isValid = true,
+       isRedirectable = false,
+       errorCode = null,
+       errorDescription = null;
 
   /// Creates a failed validation result.
   const AuthorizeValidationResult.invalid({
@@ -55,10 +55,10 @@ class AuthorizeValidationResult {
     this.client,
     this.validatedRedirectUri,
     this.state,
-  })  : isValid = false,
-        requestedScopes = const {},
-        codeChallenge = null,
-        codeChallengeMethod = null;
+  }) : isValid = false,
+       requestedScopes = const {},
+       codeChallenge = null,
+       codeChallengeMethod = null;
 }
 
 /// Service that validates incoming parameters at the authorization endpoint.
@@ -305,8 +305,7 @@ class AuthorizeRequestValidator {
           return AuthorizeValidationResult.invalid(
             isRedirectable: true,
             errorCode: 'invalid_request',
-            errorDescription:
-                'Scope token "$token" violates ABNF constraints.',
+            errorDescription: 'Scope token "$token" violates ABNF constraints.',
             client: client,
             validatedRedirectUri: validatedRedirectUri,
             state: state,

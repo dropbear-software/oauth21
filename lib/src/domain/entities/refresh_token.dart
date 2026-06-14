@@ -21,6 +21,12 @@ class RefreshToken {
   /// Whether the refresh token has been explicitly revoked.
   final bool isRevoked;
 
+  /// The timestamp when the refresh token was revoked, if any.
+  final DateTime? revokedAt;
+
+  /// Whether the token was already re-used within the rotation grace window.
+  final bool usedInGraceWindow;
+
   /// Creates a new [RefreshToken] instance.
   const RefreshToken({
     required this.tokenHash,
@@ -29,6 +35,8 @@ class RefreshToken {
     this.userId,
     this.scope,
     this.isRevoked = false,
+    this.revokedAt,
+    this.usedInGraceWindow = false,
   });
 
   /// Returns whether this refresh token is expired.
@@ -45,6 +53,8 @@ class RefreshToken {
     String? scope,
     DateTime? expiresAt,
     bool? isRevoked,
+    DateTime? revokedAt,
+    bool? usedInGraceWindow,
   }) {
     return RefreshToken(
       tokenHash: tokenHash ?? this.tokenHash,
@@ -53,6 +63,8 @@ class RefreshToken {
       scope: scope ?? this.scope,
       expiresAt: expiresAt ?? this.expiresAt,
       isRevoked: isRevoked ?? this.isRevoked,
+      revokedAt: revokedAt ?? this.revokedAt,
+      usedInGraceWindow: usedInGraceWindow ?? this.usedInGraceWindow,
     );
   }
 }

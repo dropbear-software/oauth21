@@ -16,6 +16,6 @@ export 'src/domain/ports/oauth_http_client.dart';
 export 'src/domain/ports/oauth_req_parser.dart';
 export 'src/domain/ports/token_repository.dart';
 export 'src/domain/services/authorize_request_validator.dart';
+export 'src/domain/services/token_request_handler.dart';
 export 'src/domain/value_objects/code_challenge.dart';
 export 'src/domain/value_objects/code_verifier.dart';
-
