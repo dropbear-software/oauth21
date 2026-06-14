@@ -48,14 +48,14 @@ class AuthRequest {
     this.scope,
     this.customParameters = const {},
   }) {
-    // 1. Validate redirect URI is absolute and does not contain a fragment
-    if (!redirectUri.isAbsolute) {
-      throw ArgumentError('Redirect URI must be an absolute URI.');
-    }
+    // 1. Validate redirect URI does not contain a fragment and is absolute
     if (redirectUri.hasFragment) {
       throw ArgumentError(
         'Redirect URI must not contain a fragment component (#).',
       );
+    }
+    if (!redirectUri.isAbsolute) {
+      throw ArgumentError('Redirect URI must be an absolute URI.');
     }
 
     // 2. Enforce TLS requirements
@@ -163,9 +163,7 @@ class AuthRequest {
     ];
 
     for (final key in standardKeysToAdd) {
-      if (!allKeys.add(key)) {
-        throw ArgumentError('Duplicate query parameter "$key" detected.');
-      }
+      allKeys.add(key);
     }
 
     // 4. Analyze custom parameters
@@ -212,14 +210,8 @@ class AuthRequest {
     // Serialize query parameters manually to guarantee order/format,
     // and perform one last sanity check for duplicates.
     final queryBuffer = StringBuffer();
-    final keysSeen = <String>{};
 
     queryParams.forEach((key, value) {
-      if (!keysSeen.add(key)) {
-        throw StateError(
-          'Duplicate parameter key detected during serialization: $key',
-        );
-      }
       if (queryBuffer.isNotEmpty) {
         queryBuffer.write('&');
       }
