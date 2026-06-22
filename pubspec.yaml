@@ -2,6 +2,8 @@ name: oauth21
 description: A Dart native OAuth 2.1 implementation.
 version: 0.1.0
 repository: https://github.com/dropbear-software/oauth21
+issue_tracker: https://github.com/dropbear-software/oauth21/issues
+publish_to: https://homebar.dropbear.dev
 
 environment:
   sdk: ^3.12.0
