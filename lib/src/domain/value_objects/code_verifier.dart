@@ -21,7 +21,8 @@ class CodeVerifier {
   /// Creates a [CodeVerifier] with a predefined [value].
   ///
   /// Throws [ArgumentError] if the [value] does not meet OAuth 2.1 criteria
-  /// (length between 43 and 128 characters, containing only unreserved characters).
+  /// (length between 43 and 128 characters, containing only unreserved
+  /// characters).
   CodeVerifier(this.value) {
     if (value.length < 43 || value.length > 128) {
       throw ArgumentError(
@@ -37,7 +38,8 @@ class CodeVerifier {
     }
   }
 
-  /// Generates a cryptographically secure random [CodeVerifier] of the specified [length].
+  /// Generates a cryptographically secure random [CodeVerifier] of the
+  /// specified [length].
   ///
   /// [length] must be between 43 and 128 (defaults to 43).
   factory CodeVerifier.generate([int length = 43]) {

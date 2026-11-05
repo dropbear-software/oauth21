@@ -284,8 +284,10 @@ void main() {
       );
 
       test('should authenticate via Basic Auth header', () async {
-        final authHeader =
-            'Basic ${base64.encode(utf8.encode('client-confidential:secret123'))}';
+        final encodedCreds = base64.encode(
+          utf8.encode('client-confidential:secret123'),
+        );
+        final authHeader = 'Basic $encodedCreds';
         final res = await handler.handle(
           {'grant_type': 'client_credentials'},
           authorizationHeader: authHeader,
@@ -305,82 +307,83 @@ void main() {
         expect(res.body['error'], equals('invalid_client'));
       });
 
-      test(
-        'should support case-insensitive Basic scheme and + form-urlencoded spaces in Basic Auth',
-        () async {
-          final clientWithSpace = ClientRegistration(
-            clientId: 'client with space',
-            clientType: ClientType.confidential,
-            clientSecretHash: cryptoService.hashString('secret with space'),
-            redirectUris: {Uri.parse('https://example.com/cb')},
-            allowedScopes: {'read'},
-            allowedGrantTypes: {'client_credentials'},
-          );
-          clientRepo.clients[clientWithSpace.clientId] = clientWithSpace;
+      test('should support case-insensitive Basic scheme and + form-urlencoded '
+          'spaces in Basic Auth', () async {
+        final clientWithSpace = ClientRegistration(
+          clientId: 'client with space',
+          clientType: ClientType.confidential,
+          clientSecretHash: cryptoService.hashString('secret with space'),
+          redirectUris: {Uri.parse('https://example.com/cb')},
+          allowedScopes: {'read'},
+          allowedGrantTypes: {'client_credentials'},
+        );
+        clientRepo.clients[clientWithSpace.clientId] = clientWithSpace;
 
-          final encodedId = Uri.encodeQueryComponent('client with space');
-          final encodedSecret = Uri.encodeQueryComponent('secret with space');
-          expect(encodedId, contains('+'));
-          final authHeader =
-              'basic ${base64.encode(utf8.encode('$encodedId:$encodedSecret'))}';
+        final encodedId = Uri.encodeQueryComponent('client with space');
+        final encodedSecret = Uri.encodeQueryComponent('secret with space');
+        expect(encodedId, contains('+'));
+        final encodedPair = base64.encode(
+          utf8.encode('$encodedId:$encodedSecret'),
+        );
+        final authHeader = 'basic $encodedPair';
 
-          final res = await handler.handle(
-            {'grant_type': 'client_credentials'},
-            authorizationHeader: authHeader,
-            isHttps: true,
-          );
-          expect(res.statusCode, equals(200));
-        },
-      );
+        final res = await handler.handle(
+          {'grant_type': 'client_credentials'},
+          authorizationHeader: authHeader,
+          isHttps: true,
+        );
+        expect(res.statusCode, equals(200));
+      });
 
-      test(
-        'should return 401 with WWW-Authenticate on malformed percent-encoding, colons, empty client_id, or non-Basic scheme in Authorization header',
-        () async {
-          final badPercent =
-              'Basic ${base64.encode(utf8.encode('client%ZZ:secret'))}';
-          final resPercent = await handler.handle(
-            {'grant_type': 'client_credentials'},
-            authorizationHeader: badPercent,
-            isHttps: true,
-          );
-          expect(resPercent.statusCode, equals(401));
-          expect(resPercent.headers['WWW-Authenticate'], equals('Basic'));
+      test('should return 401 with WWW-Authenticate on malformed '
+          'percent-encoding, colons, empty client_id, or non-Basic scheme in '
+          'Authorization header', () async {
+        final badPercent =
+            'Basic ${base64.encode(utf8.encode('client%ZZ:secret'))}';
+        final resPercent = await handler.handle(
+          {'grant_type': 'client_credentials'},
+          authorizationHeader: badPercent,
+          isHttps: true,
+        );
+        expect(resPercent.statusCode, equals(401));
+        expect(resPercent.headers['WWW-Authenticate'], equals('Basic'));
 
-          final extraColon =
-              'Basic ${base64.encode(utf8.encode('client:secret:extra'))}';
-          final resColon = await handler.handle(
-            {'grant_type': 'client_credentials'},
-            authorizationHeader: extraColon,
-            isHttps: true,
-          );
-          expect(resColon.statusCode, equals(401));
-          expect(resColon.headers['WWW-Authenticate'], equals('Basic'));
+        final extraColon =
+            'Basic ${base64.encode(utf8.encode('client:secret:extra'))}';
+        final resColon = await handler.handle(
+          {'grant_type': 'client_credentials'},
+          authorizationHeader: extraColon,
+          isHttps: true,
+        );
+        expect(resColon.statusCode, equals(401));
+        expect(resColon.headers['WWW-Authenticate'], equals('Basic'));
 
-          final emptyClientId =
-              'Basic ${base64.encode(utf8.encode(':secret123'))}';
-          final resEmptyId = await handler.handle(
-            {'grant_type': 'client_credentials'},
-            authorizationHeader: emptyClientId,
-            isHttps: true,
-          );
-          expect(resEmptyId.statusCode, equals(401));
-          expect(resEmptyId.headers['WWW-Authenticate'], equals('Basic'));
+        final emptyClientId =
+            'Basic ${base64.encode(utf8.encode(':secret123'))}';
+        final resEmptyId = await handler.handle(
+          {'grant_type': 'client_credentials'},
+          authorizationHeader: emptyClientId,
+          isHttps: true,
+        );
+        expect(resEmptyId.statusCode, equals(401));
+        expect(resEmptyId.headers['WWW-Authenticate'], equals('Basic'));
 
-          final resBearer = await handler.handle(
-            {'grant_type': 'client_credentials'},
-            authorizationHeader: 'Bearer some-token',
-            isHttps: true,
-          );
-          expect(resBearer.statusCode, equals(401));
-          expect(resBearer.headers['WWW-Authenticate'], equals('Basic'));
-        },
-      );
+        final resBearer = await handler.handle(
+          {'grant_type': 'client_credentials'},
+          authorizationHeader: 'Bearer some-token',
+          isHttps: true,
+        );
+        expect(resBearer.statusCode, equals(401));
+        expect(resBearer.headers['WWW-Authenticate'], equals('Basic'));
+      });
 
       test(
         'should reject conflicting client_id in body when Basic Auth is used',
         () async {
-          final authHeader =
-              'Basic ${base64.encode(utf8.encode('client-confidential:secret123'))}';
+          final encodedCreds = base64.encode(
+            utf8.encode('client-confidential:secret123'),
+          );
+          final authHeader = 'Basic $encodedCreds';
           final res = await handler.handle(
             {
               'grant_type': 'client_credentials',
@@ -394,19 +397,17 @@ void main() {
         },
       );
 
-      test(
-        'should normalize empty parameter values without mutating unmodifiable input map',
-        () async {
-          final unmodifiableBody = Map<String, String>.unmodifiable({
-            'grant_type': 'client_credentials',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'scope': '',
-          });
-          final res = await handler.handle(unmodifiableBody, isHttps: true);
-          expect(res.statusCode, equals(200));
-        },
-      );
+      test('should normalize empty parameter values without mutating '
+          'unmodifiable input map', () async {
+        final unmodifiableBody = Map<String, String>.unmodifiable({
+          'grant_type': 'client_credentials',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'scope': '',
+        });
+        final res = await handler.handle(unmodifiableBody, isHttps: true);
+        expect(res.statusCode, equals(200));
+      });
 
       test(
         'should reject non-VSCHAR characters in client_id or client_secret',
@@ -439,8 +440,10 @@ void main() {
       });
 
       test('should reject multiple authentication methods', () async {
-        final authHeader =
-            'Basic ${base64.encode(utf8.encode('client-confidential:secret123'))}';
+        final encodedCreds = base64.encode(
+          utf8.encode('client-confidential:secret123'),
+        );
+        final authHeader = 'Basic $encodedCreds';
         final res = await handler.handle(
           {
             'grant_type': 'client_credentials',
@@ -640,7 +643,8 @@ void main() {
       });
 
       test(
-        'should reject code_verifier violating ABNF (too short, too long, or invalid chars) with invalid_request without revoking code',
+        'should reject code_verifier violating ABNF (too short, too long, or '
+        'invalid chars) with invalid_request without revoking code',
         () async {
           final resShort = await handler.handle({
             'grant_type': 'authorization_code',
@@ -717,21 +721,19 @@ void main() {
         expect(res.body['error'], equals('invalid_grant'));
       });
 
-      test(
-        'should allow token request when redirect_uri is omitted per OAuth 2.1 Section 4.1.3',
-        () async {
-          final res = await handler.handle({
-            'grant_type': 'authorization_code',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'code': 'valid-auth-code',
-            'code_verifier': verifier,
-          }, isHttps: true);
+      test('should allow token request when redirect_uri is omitted per '
+          'OAuth 2.1 Section 4.1.3', () async {
+        final res = await handler.handle({
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'valid-auth-code',
+          'code_verifier': verifier,
+        }, isHttps: true);
 
-          expect(res.statusCode, equals(200));
-          expect(res.body['access_token'], isNotNull);
-        },
-      );
+        expect(res.statusCode, equals(200));
+        expect(res.body['access_token'], isNotNull);
+      });
 
       test('should detect code reuse and trigger family revocation', () async {
         // Use code first time
@@ -761,127 +763,120 @@ void main() {
         expect(tokenRepo.revokedByCodeValue, equals('valid-auth-code'));
       });
 
-      test(
-        'should NOT revoke legitimate tokens when a used code is replayed with an invalid code_verifier (OAuth 2.1 Section 7.5.3 DoS prevention)',
-        () async {
-          final res1 = await handler.handle({
-            'grant_type': 'authorization_code',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'code': 'valid-auth-code',
-            'code_verifier': verifier,
-            'redirect_uri': 'https://example.com/cb',
-          }, isHttps: true);
-          expect(res1.statusCode, equals(200));
-          final accessHash = cryptoService.hashString(
-            res1.body['access_token'] as String,
-          );
-          final refreshHash = cryptoService.hashString(
-            res1.body['refresh_token'] as String,
-          );
+      test('should NOT revoke legitimate tokens when a used code is replayed '
+          'with an invalid code_verifier (OAuth 2.1 Section 7.5.3 DoS '
+          'prevention)', () async {
+        final res1 = await handler.handle({
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'valid-auth-code',
+          'code_verifier': verifier,
+          'redirect_uri': 'https://example.com/cb',
+        }, isHttps: true);
+        expect(res1.statusCode, equals(200));
+        final accessHash = cryptoService.hashString(
+          res1.body['access_token'] as String,
+        );
+        final refreshHash = cryptoService.hashString(
+          res1.body['refresh_token'] as String,
+        );
 
-          // Attacker replays the intercepted authorization code without the valid PKCE verifier
-          final resAttack = await handler.handle({
-            'grant_type': 'authorization_code',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'code': 'valid-auth-code',
-            'code_verifier':
-                'attacker-wrong-verifier-string-1234567890-attacker',
-            'redirect_uri': 'https://example.com/cb',
-          }, isHttps: true);
+        // Attacker replays the intercepted authorization code without the
+        // valid PKCE verifier
+        final resAttack = await handler.handle({
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'valid-auth-code',
+          'code_verifier': 'attacker-wrong-verifier-string-1234567890-attacker',
+          'redirect_uri': 'https://example.com/cb',
+        }, isHttps: true);
 
-          expect(resAttack.statusCode, equals(400));
-          expect(resAttack.body['error'], equals('invalid_grant'));
-          expect(tokenRepo.revokeByCodeCalled, isFalse);
+        expect(resAttack.statusCode, equals(400));
+        expect(resAttack.body['error'], equals('invalid_grant'));
+        expect(tokenRepo.revokeByCodeCalled, isFalse);
 
-          // Legitimate tokens remain active
-          final accessToken = await tokenRepo.findAccessTokenByHash(accessHash);
-          final refreshToken = await tokenRepo.findRefreshTokenByHash(
-            refreshHash,
-          );
-          expect(accessToken?.isValid, isTrue);
-          expect(refreshToken?.isValid, isTrue);
-        },
-      );
+        // Legitimate tokens remain active
+        final accessToken = await tokenRepo.findAccessTokenByHash(accessHash);
+        final refreshToken = await tokenRepo.findRefreshTokenByHash(
+          refreshHash,
+        );
+        expect(accessToken?.isValid, isTrue);
+        expect(refreshToken?.isValid, isTrue);
+      });
 
-      test(
-        'should detect code reuse and trigger family revocation even if expired',
-        () async {
-          final expiredUsedCode = AuthCode(
-            code: 'expired-used-auth-code',
-            clientId: 'client-confidential',
-            redirectUri: Uri.parse('https://example.com/cb'),
-            userId: 'user-123',
-            codeChallenge: challenge,
-            codeChallengeMethod: 'S256',
-            expiresAt: DateTime.now().subtract(const Duration(minutes: 5)),
-            isUsed: true,
-          );
-          await authCodeRepo.save(expiredUsedCode);
+      test('should detect code reuse and trigger family revocation even if '
+          'expired', () async {
+        final expiredUsedCode = AuthCode(
+          code: 'expired-used-auth-code',
+          clientId: 'client-confidential',
+          redirectUri: Uri.parse('https://example.com/cb'),
+          userId: 'user-123',
+          codeChallenge: challenge,
+          codeChallengeMethod: 'S256',
+          expiresAt: DateTime.now().subtract(const Duration(minutes: 5)),
+          isUsed: true,
+        );
+        await authCodeRepo.save(expiredUsedCode);
 
-          final res = await handler.handle({
-            'grant_type': 'authorization_code',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'code': 'expired-used-auth-code',
-            'code_verifier': verifier,
-            'redirect_uri': 'https://example.com/cb',
-          }, isHttps: true);
+        final res = await handler.handle({
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'expired-used-auth-code',
+          'code_verifier': verifier,
+          'redirect_uri': 'https://example.com/cb',
+        }, isHttps: true);
 
-          expect(res.statusCode, equals(400));
-          expect(res.body['error'], equals('invalid_grant'));
-          expect(tokenRepo.revokeByCodeCalled, isTrue);
-          expect(
-            tokenRepo.revokedByCodeValue,
-            equals('expired-used-auth-code'),
-          );
-        },
-      );
+        expect(res.statusCode, equals(400));
+        expect(res.body['error'], equals('invalid_grant'));
+        expect(tokenRepo.revokeByCodeCalled, isTrue);
+        expect(tokenRepo.revokedByCodeValue, equals('expired-used-auth-code'));
+      });
 
-      test(
-        'should allow at most one concurrent authorization_code redemption and revoke issued tokens on concurrent replay',
-        () async {
-          final params = {
-            'grant_type': 'authorization_code',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'code': 'valid-auth-code',
-            'code_verifier': verifier,
-            'redirect_uri': 'https://example.com/cb',
-          };
+      test('should allow at most one concurrent authorization_code redemption '
+          'and revoke issued tokens on concurrent replay', () async {
+        final params = {
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'valid-auth-code',
+          'code_verifier': verifier,
+          'redirect_uri': 'https://example.com/cb',
+        };
 
-          final results = await Future.wait([
-            handler.handle(params, isHttps: true),
-            handler.handle(params, isHttps: true),
-          ]);
+        final results = await Future.wait([
+          handler.handle(params, isHttps: true),
+          handler.handle(params, isHttps: true),
+        ]);
 
-          final successes = results.where((r) => r.statusCode == 200).toList();
-          final failures = results.where((r) => r.statusCode == 400).toList();
+        final successes = results.where((r) => r.statusCode == 200).toList();
+        final failures = results.where((r) => r.statusCode == 400).toList();
 
-          expect(successes.length, equals(1));
-          expect(failures.length, equals(1));
-          expect(failures.first.body['error'], equals('invalid_grant'));
+        expect(successes.length, equals(1));
+        expect(failures.length, equals(1));
+        expect(failures.first.body['error'], equals('invalid_grant'));
 
-          final issuedAccessHash = cryptoService.hashString(
-            successes.first.body['access_token'] as String,
-          );
-          final issuedRefreshHash = cryptoService.hashString(
-            successes.first.body['refresh_token'] as String,
-          );
-          final storedAccess = await tokenRepo.findAccessTokenByHash(
-            issuedAccessHash,
-          );
-          final storedRefresh = await tokenRepo.findRefreshTokenByHash(
-            issuedRefreshHash,
-          );
-          expect(storedAccess?.isRevoked, isTrue);
-          expect(storedRefresh?.isRevoked, isTrue);
-        },
-      );
+        final issuedAccessHash = cryptoService.hashString(
+          successes.first.body['access_token'] as String,
+        );
+        final issuedRefreshHash = cryptoService.hashString(
+          successes.first.body['refresh_token'] as String,
+        );
+        final storedAccess = await tokenRepo.findAccessTokenByHash(
+          issuedAccessHash,
+        );
+        final storedRefresh = await tokenRepo.findRefreshTokenByHash(
+          issuedRefreshHash,
+        );
+        expect(storedAccess?.isRevoked, isTrue);
+        expect(storedRefresh?.isRevoked, isTrue);
+      });
 
       test(
-        'should revoke rotated descendant tokens when original authorization code is replayed after refresh rotation',
+        'should revoke rotated descendant tokens when original authorization '
+        'code is replayed after refresh rotation',
         () async {
           // 1. Redeem authorization code
           final res1 = await handler.handle({
@@ -921,7 +916,8 @@ void main() {
           }, isHttps: true);
           expect(resReplay.statusCode, equals(400));
 
-          // 4. Verify rotated descendant tokens were revoked via authorizationCode lineage
+          // 4. Verify rotated descendant tokens were revoked via
+          // authorizationCode lineage
           final rotatedAccess = await tokenRepo.findAccessTokenByHash(
             rotatedAccessHash,
           );
@@ -944,10 +940,8 @@ void main() {
         }, isHttps: true);
         expect(res.statusCode, equals(200));
         expect(res.body['access_token'], isNotNull);
-        expect(
-          res.body['refresh_token'],
-          isNull,
-        ); // Client credentials does not return refresh token
+        // Client credentials does not return refresh token
+        expect(res.body['refresh_token'], isNull);
         expect(res.body['scope'], equals('read'));
       });
 
@@ -965,35 +959,33 @@ void main() {
         },
       );
 
-      test(
-        'should deduplicate scope tokens and reject malformed scope ABNF in client_credentials',
-        () async {
-          final resDedup = await handler.handle({
+      test('should deduplicate scope tokens and reject malformed scope ABNF in '
+          'client_credentials', () async {
+        final resDedup = await handler.handle({
+          'grant_type': 'client_credentials',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'scope': 'read write read',
+        }, isHttps: true);
+        expect(resDedup.statusCode, equals(200));
+        expect(resDedup.body['scope'], equals('read write'));
+
+        for (final badScope in [
+          'read  write',
+          ' read',
+          'read"quote',
+          r'read\slash',
+        ]) {
+          final resBad = await handler.handle({
             'grant_type': 'client_credentials',
             'client_id': 'client-confidential',
             'client_secret': 'secret123',
-            'scope': 'read write read',
+            'scope': badScope,
           }, isHttps: true);
-          expect(resDedup.statusCode, equals(200));
-          expect(resDedup.body['scope'], equals('read write'));
-
-          for (final badScope in [
-            'read  write',
-            ' read',
-            'read"quote',
-            r'read\slash',
-          ]) {
-            final resBad = await handler.handle({
-              'grant_type': 'client_credentials',
-              'client_id': 'client-confidential',
-              'client_secret': 'secret123',
-              'scope': badScope,
-            }, isHttps: true);
-            expect(resBad.statusCode, equals(400));
-            expect(resBad.body['error'], equals('invalid_scope'));
-          }
-        },
-      );
+          expect(resBad.statusCode, equals(400));
+          expect(resBad.body['error'], equals('invalid_scope'));
+        }
+      });
     });
 
     group('Refresh Token Grant', () {
@@ -1014,34 +1006,33 @@ void main() {
         await tokenRepo.saveRefreshToken(activeToken);
       });
 
-      test(
-        'should rotate refresh token and return new tokens while preserving original expiresAt',
-        () async {
-          final res = await handler.handle({
-            'grant_type': 'refresh_token',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'refresh_token': rawTokenVal,
-          }, isHttps: true);
+      test('should rotate refresh token and return new tokens while preserving '
+          'original expiresAt', () async {
+        final res = await handler.handle({
+          'grant_type': 'refresh_token',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'refresh_token': rawTokenVal,
+        }, isHttps: true);
 
-          expect(res.statusCode, equals(200));
-          expect(res.body['access_token'], isNotNull);
-          expect(res.body['refresh_token'], isNotNull);
-          expect(res.body['refresh_token'], isNot(equals(rawTokenVal)));
+        expect(res.statusCode, equals(200));
+        expect(res.body['access_token'], isNotNull);
+        expect(res.body['refresh_token'], isNotNull);
+        expect(res.body['refresh_token'], isNot(equals(rawTokenVal)));
 
-          final oldHash = cryptoService.hashString(rawTokenVal);
-          final oldToken = await tokenRepo.findRefreshTokenByHash(oldHash);
-          expect(oldToken?.isRevoked, isTrue);
+        final oldHash = cryptoService.hashString(rawTokenVal);
+        final oldToken = await tokenRepo.findRefreshTokenByHash(oldHash);
+        expect(oldToken?.isRevoked, isTrue);
 
-          final newRefreshVal = res.body['refresh_token'] as String;
-          final newHash = cryptoService.hashString(newRefreshVal);
-          final newToken = await tokenRepo.findRefreshTokenByHash(newHash);
-          expect(newToken?.expiresAt, equals(activeToken.expiresAt));
-        },
-      );
+        final newRefreshVal = res.body['refresh_token'] as String;
+        final newHash = cryptoService.hashString(newRefreshVal);
+        final newToken = await tokenRepo.findRefreshTokenByHash(newHash);
+        expect(newToken?.expiresAt, equals(activeToken.expiresAt));
+      });
 
       test(
-        'should deduplicate narrowed scope and reject malformed scope ABNF or non-VSCHAR refresh_token',
+        'should deduplicate narrowed scope and reject malformed scope ABNF or '
+        'non-VSCHAR refresh_token',
         () async {
           final resDedup = await handler.handle({
             'grant_type': 'refresh_token',
@@ -1128,30 +1119,30 @@ void main() {
         expect(res.body['error'], equals('invalid_grant'));
       });
 
-      test(
-        'should reject refresh token requesting scope exceeding original without revoking the refresh token',
-        () async {
-          final res = await handler.handle({
-            'grant_type': 'refresh_token',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'refresh_token': rawTokenVal,
-            'scope': 'read admin',
-          }, isHttps: true);
-          expect(res.statusCode, equals(400));
-          expect(res.body['error'], equals('invalid_scope'));
+      test('should reject refresh token requesting scope exceeding original '
+          'without revoking the refresh token', () async {
+        final res = await handler.handle({
+          'grant_type': 'refresh_token',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'refresh_token': rawTokenVal,
+          'scope': 'read admin',
+        }, isHttps: true);
+        expect(res.statusCode, equals(400));
+        expect(res.body['error'], equals('invalid_scope'));
 
-          // Refresh token must remain unrevoked so the client can retry with a valid scope
-          final hash = cryptoService.hashString(rawTokenVal);
-          final stored = await tokenRepo.findRefreshTokenByHash(hash);
-          expect(stored?.isRevoked, isFalse);
-        },
-      );
+        // Refresh token must remain unrevoked so the client can retry with a
+        // valid scope
+        final hash = cryptoService.hashString(rawTokenVal);
+        final stored = await tokenRepo.findRefreshTokenByHash(hash);
+        expect(stored?.isRevoked, isFalse);
+      });
 
       test(
         'should detect refresh token replay and revoke active family',
         () async {
-          // Revoke the refresh token first and simulate it was revoked 31 seconds ago
+          // Revoke the refresh token first and simulate it was revoked 31
+          // seconds ago
           final hash = cryptoService.hashString(rawTokenVal);
           final token = await tokenRepo.findRefreshTokenByHash(hash);
           if (token != null) {
@@ -1197,7 +1188,8 @@ void main() {
         expect(res1.body['access_token'], isNotNull);
         expect(res1.body['refresh_token'], isNotNull);
 
-        // Verify that the token is marked as used in grace window and revokedAt is preserved
+        // Verify that the token is marked as used in grace window and
+        // revokedAt is preserved
         final updatedToken = await tokenRepo.findRefreshTokenByHash(hash);
         expect(updatedToken?.usedInGraceWindow, isTrue);
         expect(updatedToken?.revokedAt, equals(originalRevokedAt));
@@ -1244,32 +1236,32 @@ void main() {
         expect(tokenRepo.revokeAllCalled, isTrue);
       });
 
-      test(
-        'should allow at most one concurrent refresh_token rotation when grace window is exhausted and revoke family on third concurrent attempt',
-        () async {
-          final params = {
-            'grant_type': 'refresh_token',
-            'client_id': 'client-confidential',
-            'client_secret': 'secret123',
-            'refresh_token': rawTokenVal,
-          };
+      test('should allow at most one concurrent refresh_token rotation when '
+          'grace window is exhausted and revoke family on third concurrent '
+          'attempt', () async {
+        final params = {
+          'grant_type': 'refresh_token',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'refresh_token': rawTokenVal,
+        };
 
-          // 3 concurrent requests: 1st rotates, 2nd uses single grace-window retry, 3rd detects replay and revokes family
-          final results = await Future.wait([
-            handler.handle(params, isHttps: true),
-            handler.handle(params, isHttps: true),
-            handler.handle(params, isHttps: true),
-          ]);
+        // 3 concurrent requests: 1st rotates, 2nd uses single grace-window
+        // retry, 3rd detects replay and revokes family
+        final results = await Future.wait([
+          handler.handle(params, isHttps: true),
+          handler.handle(params, isHttps: true),
+          handler.handle(params, isHttps: true),
+        ]);
 
-          final successes = results.where((r) => r.statusCode == 200).toList();
-          final failures = results.where((r) => r.statusCode == 400).toList();
+        final successes = results.where((r) => r.statusCode == 200).toList();
+        final failures = results.where((r) => r.statusCode == 400).toList();
 
-          expect(successes.length, equals(2));
-          expect(failures.length, equals(1));
-          expect(failures.first.body['error'], equals('invalid_grant'));
-          expect(tokenRepo.revokeAllCalled, isTrue);
-        },
-      );
+        expect(successes.length, equals(2));
+        expect(failures.length, equals(1));
+        expect(failures.first.body['error'], equals('invalid_grant'));
+        expect(tokenRepo.revokeAllCalled, isTrue);
+      });
     });
 
     test('should protect against timing attacks by validating that '

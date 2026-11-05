@@ -67,7 +67,8 @@ Future<shelf.Response> handleAuthorizeRequest(
     );
   }
 
-  // Collect query parameters supporting multi-value parameters for pollution checks.
+  // Collect query parameters supporting multi-value parameters for pollution
+  // checks.
   final params = request.requestedUri.queryParametersAll;
 
   final result = await validator.validate(params);
@@ -167,7 +168,8 @@ shelf.Response _redirectSeeOther({
 /// Handles incoming POST token requests.
 ///
 /// Form-decodes request bodies, extracts client credentials from headers,
-/// validates transport security, and returns JSON responses conforming to specs.
+/// validates transport security, and returns JSON responses conforming to
+/// specs.
 Future<shelf.Response> handleTokenRequest(
   shelf.Request request, {
   required TokenRequestHandler handler,
@@ -258,7 +260,8 @@ Future<shelf.Response> handleTokenRequest(
 ///   `WWW-Authenticate` and `Cache-Control: no-store` headers.
 /// - On success, attaches the validated [AccessToken] to `request.context`
 ///   under [oauthAccessTokenContextKey] (retrievable via
-///   [getAccessTokenFromContext]) and forwards the request to the inner handler.
+///   [getAccessTokenFromContext]) and forwards the request to the inner
+///   handler.
 shelf.Middleware bearerAuthenticationMiddleware({
   required BearerTokenValidator validator,
   Set<String> requiredScopes = const {},

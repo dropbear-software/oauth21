@@ -91,8 +91,9 @@ void main() async {
   final server = await shelf_io.serve(handleRoutes, 'localhost', 8080);
   print('[Server] Running at http://${server.address.host}:${server.port}\n');
 
-  // Initialize the client
-  // The client requires a secure authorization endpoint URL to pass syntax validation.
+  // Initialize the client.
+  // The client requires a secure authorization endpoint URL to pass syntax
+  // validation.
   final httpClient = http.Client();
   final oauthClient = OAuthClient(
     authorizationEndpoint: 'https://localhost:8080/authorize',
@@ -106,8 +107,9 @@ void main() async {
     print('--- Step 1: Generate PKCE Secrets ---');
     final codeVerifier = CodeVerifier.generate();
     final codeChallenge = CodeChallenge.s256(codeVerifier);
-    print('[Client] Code Verifier generated (masked in toString()).');
-    print('[Client] Code Challenge S256 calculated: ${codeChallenge.value}');
+    print('''
+[Client] Code Verifier generated (masked in toString()).
+[Client] Code Challenge S256 calculated: ${codeChallenge.value}''');
 
     print('\n--- Step 2: Client initiates Authorize Request ---');
     final authRequest = oauthClient.createAuthorizationRequest(
@@ -117,7 +119,8 @@ void main() async {
       scope: 'read write',
     );
 
-    // Convert the https validation URI to the actual local http endpoint for request
+    // Convert the https validation URI to the actual local http endpoint for
+    // the request.
     final authUri = authRequest.toUri().replace(scheme: 'http');
     print('[Client] Redirecting user to: $authUri');
 
@@ -159,8 +162,9 @@ void main() async {
       case TokenSuccess(:final accessToken, :final refreshToken):
         accessTokenVal = accessToken;
         refreshTokenVal = refreshToken;
-        print('[Client] Access Token obtained successfully: $accessTokenVal');
-        print('[Client] Refresh Token obtained: $refreshTokenVal');
+        print('''
+[Client] Access Token obtained successfully: $accessTokenVal
+[Client] Refresh Token obtained: $refreshTokenVal''');
       case TokenError(:final error, :final errorDescription):
         print('[Client] Token exchange failed: $error - $errorDescription');
         return;
@@ -174,8 +178,9 @@ void main() async {
 
       switch (refreshResult) {
         case TokenSuccess(:final accessToken, :final refreshToken):
-          print('[Client] Refreshed Access Token successfully: $accessToken');
-          print('[Client] New Refresh Token obtained: $refreshToken');
+          print('''
+[Client] Refreshed Access Token successfully: $accessToken
+[Client] New Refresh Token obtained: $refreshToken''');
           // Save the rotated refresh token value
           refreshTokenVal = refreshToken;
         case TokenError(:final error, :final errorDescription):
@@ -183,9 +188,11 @@ void main() async {
       }
     }
 
-    print('\n--- Step 6: Simulate Replay Attack (Cascading Revocation) ---');
     print(
-      '[Attacker] First reuse attempt of the revoked refresh token (within grace window)...',
+      '''
+
+--- Step 6: Simulate Replay Attack (Cascading Revocation) ---
+[Attacker] First reuse attempt of the revoked refresh token (within grace window)...''',
     );
     final replayResult1 = await oauthClient.exchangeRefreshToken(
       tokenResult.refreshToken!,
@@ -193,11 +200,10 @@ void main() async {
 
     switch (replayResult1) {
       case TokenSuccess(:final accessToken, :final refreshToken):
-        print(
-          '[Server] Allowed first retry request within 30s grace window.\n'
-          '         Access Token: $accessToken\n'
-          '         Refresh Token: $refreshToken',
-        );
+        print('''
+[Server] Allowed first retry request within 30s grace window.
+         Access Token: $accessToken
+         Refresh Token: $refreshToken''');
       case TokenError(:final error, :final errorDescription):
         print('[Server] Replay blocked: $error - $errorDescription');
     }
@@ -213,10 +219,9 @@ void main() async {
       case TokenSuccess():
         print('[Attacker] SECURITY FAILURE: Replay succeeded twice!');
       case TokenError(:final error, :final errorDescription):
-        print(
-          '[Server] SECURITY SUCCESS: Replay blocked on second attempt: $error - $errorDescription\n'
-          '         (triggered cascading revocation for all client/user tokens)',
-        );
+        print('''
+[Server] SECURITY SUCCESS: Replay blocked on second attempt: $error - $errorDescription
+         (triggered cascading revocation for all client/user tokens)''');
     }
   } finally {
     print('\n--- Step 7: Clean Up ---');

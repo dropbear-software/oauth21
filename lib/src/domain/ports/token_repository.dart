@@ -25,9 +25,9 @@ abstract interface class TokenRepository {
   /// Revokes a refresh token by its SHA-256 hash.
   Future<void> revokeRefreshTokenByHash(String hashedValue);
 
-  /// Saves newly issued tokens atomically unless [AccessToken.authorizationCode]
-  /// has already been tombstoned by a concurrent replay call to
-  /// [revokeByAuthorizationCode].
+  /// Saves newly issued tokens atomically unless
+  /// [AccessToken.authorizationCode] has already been tombstoned by a
+  /// concurrent replay call to [revokeByAuthorizationCode].
   ///
   /// Returns `true` if the tokens were saved as active, or `false` if the
   /// originating authorization code was already compromised (in which case the

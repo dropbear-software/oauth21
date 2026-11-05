@@ -10,7 +10,8 @@ enum ClientType {
   confidential,
 }
 
-/// Domain entity representing a registered client with the authorization server.
+/// Domain entity representing a registered client with the authorization
+/// server.
 @immutable
 class ClientRegistration {
   /// The client's unique identifier.
@@ -70,7 +71,8 @@ class ClientRegistration {
     for (final scope in this.allowedScopes) {
       if (scope.isEmpty || !scopeTokenRegex.hasMatch(scope)) {
         throw ArgumentError(
-          'Scope token "$scope" contains invalid characters violating ABNF scope syntax.',
+          'Scope token "$scope" contains invalid characters violating ABNF '
+          'scope syntax.',
         );
       }
     }

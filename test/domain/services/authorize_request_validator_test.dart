@@ -94,30 +94,28 @@ void main() {
       );
     });
 
-    test(
-      'should reject unsafe or non-reverse-domain redirect_uri schemes (non-redirectable)',
-      () async {
-        for (final badRedirect in [
-          'javascript:alert(1)',
-          'data:text/html,hi',
-          'file:///etc/passwd',
-          'myapp:/cb',
-          '.app:/cb',
-          'com..app:/cb',
-          'http://example.com/cb',
-        ]) {
-          final params = createParams(redirectUri: badRedirect);
-          final result = await validator.validate(params);
-          expect(
-            result,
-            isA<AuthorizeDirectError>(),
-            reason: 'Expected $badRedirect to be rejected',
-          );
-          final err = result as AuthorizeDirectError;
-          expect(err.errorCode, equals('invalid_request'));
-        }
-      },
-    );
+    test('should reject unsafe or non-reverse-domain redirect_uri schemes '
+        '(non-redirectable)', () async {
+      for (final badRedirect in [
+        'javascript:alert(1)',
+        'data:text/html,hi',
+        'file:///etc/passwd',
+        'myapp:/cb',
+        '.app:/cb',
+        'com..app:/cb',
+        'http://example.com/cb',
+      ]) {
+        final params = createParams(redirectUri: badRedirect);
+        final result = await validator.validate(params);
+        expect(
+          result,
+          isA<AuthorizeDirectError>(),
+          reason: 'Expected $badRedirect to be rejected',
+        );
+        final err = result as AuthorizeDirectError;
+        expect(err.errorCode, equals('invalid_request'));
+      }
+    });
 
     test(
       'should default redirectUri if omitted and client has only one',
@@ -440,7 +438,8 @@ void main() {
     });
 
     test(
-      'should reject non-loopback redirect_uri containing dot-segment path traversal or reserved/duplicate/malformed query parameters (#10)',
+      'should reject non-loopback redirect_uri containing dot-segment path '
+      'traversal or reserved/duplicate/malformed query parameters (#10)',
       () async {
         for (final badRedirect in [
           'https://example.com/evil/../cb',
@@ -468,7 +467,8 @@ void main() {
     );
 
     test(
-      'should reject client not authorized for authorization_code grant with unauthorized_client (#12)',
+      'should reject client not authorized for authorization_code grant with '
+      'unauthorized_client (#12)',
       () async {
         final ccOnlyClient = ClientRegistration(
           clientId: 'client-cc-only',
@@ -491,7 +491,8 @@ void main() {
     );
 
     test(
-      'should treat empty parameter values (key=) as omitted without mutating unmodifiable maps (#13)',
+      'should treat empty parameter values (key=) as omitted without mutating '
+      'unmodifiable maps (#13)',
       () async {
         final singleRedirectClient = ClientRegistration(
           clientId: 'client-single-empty',

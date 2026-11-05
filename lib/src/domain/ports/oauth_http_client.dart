@@ -3,10 +3,12 @@ import 'dart:async';
 /// A simple HTTP client interface for executing out-of-band requests
 /// to the OAuth token endpoint.
 ///
-/// This port decouples the core domain from concrete HTTP client implementations,
-/// allowing the domain to run in any platform context (shelf, Flutter, CLI, web, etc.).
+/// This port decouples the core domain from concrete HTTP client
+/// implementations, allowing the domain to run in any platform context (shelf,
+/// Flutter, CLI, web, etc.).
 abstract interface class OAuthHttpClient {
-  /// Executes an HTTP POST request to the specified [url] with form-urlencoded data.
+  /// Executes an HTTP POST request to the specified [url] with form-urlencoded
+  /// data.
   ///
   /// The [headers] must be included in the request.
   /// The [body] represents query/form-urlencoded parameters.

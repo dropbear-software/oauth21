@@ -20,27 +20,29 @@ void main() {
         },
       );
 
-      test(
-        'should strictly conform to ABNF code-challenge syntax limits over high iterations',
-        () {
-          // Enforces length between 43 and 128 characters, containing ONLY unreserved characters: [A-Za-z0-9\-._~]
-          // This implicitly ensures NO padding (=), NO standard base64 plus (+), and NO forward slash (/) exist.
-          final codeChallengeRegex = RegExp(r'^[A-Za-z0-9\-._~]{43,128}$');
+      test('should strictly conform to ABNF code-challenge syntax limits over '
+          'high iterations', () {
+        // Enforces length between 43 and 128 characters, containing ONLY
+        // unreserved characters: [A-Za-z0-9\-._~]. This implicitly ensures
+        // NO padding (=), NO standard base64 plus (+), and NO forward slash
+        // (/) exist.
+        final codeChallengeRegex = RegExp(r'^[A-Za-z0-9\-._~]{43,128}$');
 
-          // Run 200 iterations to guarantee high statistical coverage of varied hash byte distributions
-          for (var i = 0; i < 200; i++) {
-            final verifier = CodeVerifier.generate();
-            final challenge = CodeChallenge.s256(verifier);
+        // Run 200 iterations to guarantee high statistical coverage of
+        // varied hash byte distributions.
+        for (var i = 0; i < 200; i++) {
+          final verifier = CodeVerifier.generate();
+          final challenge = CodeChallenge.s256(verifier);
 
-            expect(
-              codeChallengeRegex.hasMatch(challenge.value),
-              isTrue,
-              reason:
-                  'Generated challenge "${challenge.value}" contains characters violating the unreserved ABNF spec pool.',
-            );
-          }
-        },
-      );
+          expect(
+            codeChallengeRegex.hasMatch(challenge.value),
+            isTrue,
+            reason:
+                'Generated challenge "${challenge.value}" contains '
+                'characters violating the unreserved ABNF spec pool.',
+          );
+        }
+      });
     });
 
     group('equality & representations', () {

@@ -29,7 +29,8 @@ void main() {
       test('should accept all unreserved characters', () {
         // Allowed pool: [A-Z], [a-z], [0-9], -, ., _, ~
         const val =
-            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+            'abcdefghijklmnopqrstuvwxyz0123456789-._~';
         // Need to make it at least 43 characters (which it is: 66 characters)
         expect(val.length, greaterThanOrEqualTo(43));
         final verifier = CodeVerifier(val);
@@ -46,20 +47,18 @@ void main() {
         expect(() => CodeVerifier('$base#'), throwsArgumentError);
       });
 
-      test(
-        'should reject verifiers containing multi-byte or non-ASCII characters even if length matches',
-        () {
-          // 'A' * 41 (length 41) + '🚀' (length 2 code units) = total length 43
-          final surrogatePairValue = '${'A' * 41}🚀';
-          expect(surrogatePairValue.length, equals(43));
-          expect(() => CodeVerifier(surrogatePairValue), throwsArgumentError);
+      test('should reject verifiers containing multi-byte or non-ASCII '
+          'characters even if length matches', () {
+        // 'A' * 41 (length 41) + '🚀' (length 2 code units) = total length 43
+        final surrogatePairValue = '${'A' * 41}🚀';
+        expect(surrogatePairValue.length, equals(43));
+        expect(() => CodeVerifier(surrogatePairValue), throwsArgumentError);
 
-          // 'A' * 42 (length 42) + 'é' (length 1 code unit) = total length 43
-          final accentedValue = '${'A' * 42}é';
-          expect(accentedValue.length, equals(43));
-          expect(() => CodeVerifier(accentedValue), throwsArgumentError);
-        },
-      );
+        // 'A' * 42 (length 42) + 'é' (length 1 code unit) = total length 43
+        final accentedValue = '${'A' * 42}é';
+        expect(accentedValue.length, equals(43));
+        expect(() => CodeVerifier(accentedValue), throwsArgumentError);
+      });
     });
 
     group('generation', () {

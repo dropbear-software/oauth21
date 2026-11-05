@@ -197,7 +197,8 @@ class BearerTokenValidator {
         ? authorizationHeaders.first
         : authorizationHeader;
 
-    // 3. Missing, empty, or non-Bearer Authorization header -> 401 without error code (Section 5.3.1)
+    // 3. Missing, empty, or non-Bearer Authorization header -> 401 without
+    // error code (Section 5.3.1)
     if (effectiveHeader == null ||
         effectiveHeader.trim().isEmpty ||
         !_bearerSchemePrefixRegex.hasMatch(effectiveHeader.trim())) {
@@ -243,7 +244,8 @@ class BearerTokenValidator {
           statusCode: 403,
           errorCode: 'insufficient_scope',
           errorDescription:
-              'The request requires higher privileges than provided by the access token.',
+              'The request requires higher privileges than provided by the '
+              'access token.',
           scope: requiredScopes.join(' '),
         );
       }

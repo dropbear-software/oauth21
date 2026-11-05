@@ -3,7 +3,8 @@ import 'package:crypto/crypto.dart';
 import 'package:meta/meta.dart';
 import 'code_verifier.dart';
 
-/// A code challenge derived from a [CodeVerifier] using a cryptographic transform.
+/// A code challenge derived from a [CodeVerifier] using a cryptographic
+/// transform.
 ///
 /// Under OAuth 2.1, only the `S256` code challenge method is permitted.
 @immutable
@@ -23,7 +24,8 @@ class CodeChallenge {
   factory CodeChallenge.s256(CodeVerifier verifier) {
     final bytes = utf8.encode(verifier.value);
     final hash = sha256.convert(bytes);
-    // base64Url.encode generates URL-safe base64, but we must strip any trailing '=' padding
+    // base64Url.encode generates URL-safe base64, but we must strip any
+    // trailing '=' padding.
     final challenge = base64Url.encode(hash.bytes).replaceAll('=', '');
     return CodeChallenge._(challenge, 'S256');
   }

@@ -81,7 +81,8 @@ class TokenRequestHandler {
       );
     }
 
-    // Normalize empty parameter values as omitted per Section 3.2 without mutating input map
+    // Normalize empty parameter values as omitted per Section 3.2 without
+    // mutating the input map.
     body = {
       for (final entry in body.entries)
         if (entry.value.isNotEmpty) entry.key: entry.value,
@@ -222,7 +223,8 @@ class TokenRequestHandler {
         (clientSecret != null && !vscharOptionalRegex.hasMatch(clientSecret))) {
       return _credentialsError(
         _badRequest(
-          'Client credentials contain invalid characters or untrimmed whitespace.',
+          'Client credentials contain invalid characters or untrimmed '
+          'whitespace.',
         ),
       );
     }
@@ -487,8 +489,8 @@ class TokenRequestHandler {
       );
     }
 
-    // Replay pre-check: if already revoked and outside grace window (or grace already consumed),
-    // trigger cascading family revocation immediately.
+    // Replay pre-check: if already revoked and outside grace window (or grace
+    // already consumed), trigger cascading family revocation immediately.
     if (oldRefreshToken.isRevoked) {
       final revokedAt = oldRefreshToken.revokedAt;
       final isWithinGrace =

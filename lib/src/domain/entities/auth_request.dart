@@ -7,11 +7,11 @@ import '../value_objects/code_challenge.dart';
 ///
 /// This class compiles and validates parameters for the authorization URL.
 /// It enforces OAuth 2.1 rules, including:
-/// - Only authorization code flow is permitted (`response_type=code` is enforced;
-///   implicit `response_type=token` and password grant are blocked).
+/// - Only authorization code flow is permitted (`response_type=code` is
+///   enforced; implicit `response_type=token` and password grant are blocked).
 /// - The redirect URI must not contain a fragment component (`#`).
-/// - Parameter pollution is neutralized: duplicate parameter keys in the base endpoint,
-///   custom parameters, or standard parameters are strictly rejected.
+/// - Parameter pollution is neutralized: duplicate parameter keys in the base
+///   endpoint, custom parameters, or standard parameters are strictly rejected.
 @immutable
 class AuthRequest {
   /// The authorization server's endpoint.
@@ -39,8 +39,9 @@ class AuthRequest {
   ///
   /// Throws [ArgumentError] if:
   /// - The [redirectUri] has a fragment component (`#`).
-  /// - There are duplicate parameter keys or collisions between standard parameters,
-  ///   existing parameters in the [authorizationEndpoint], and [customParameters].
+  /// - There are duplicate parameter keys or collisions between standard
+  ///   parameters, existing parameters in the [authorizationEndpoint], and
+  ///   [customParameters].
   AuthRequest({
     required this.authorizationEndpoint,
     required this.clientId,
@@ -68,7 +69,8 @@ class AuthRequest {
         authorizationEndpoint,
         'authorizationEndpoint',
         'Security violation: authorizationEndpoint must be a valid https URI '
-            'with a host and no fragment or userinfo. Got: "$authorizationEndpoint".',
+            'with a host and no fragment or userinfo. '
+            'Got: "$authorizationEndpoint".',
       );
     }
 
@@ -76,7 +78,8 @@ class AuthRequest {
     if (scope != null && scope!.trim().isNotEmpty) {
       if (!isValidScopeString(scope!)) {
         throw ArgumentError(
-          'Malformed scope: scope tokens must be non-empty and only contain characters in ranges %x21, %x23-5B, and %x5D-7E.',
+          'Malformed scope: scope tokens must be non-empty and only contain '
+          'characters in ranges %x21, %x23-5B, and %x5D-7E.',
         );
       }
     }
@@ -84,12 +87,14 @@ class AuthRequest {
     // 4. Enforce VSCHAR syntax on client_id and state (ABNF range %x20-7E)
     if (!vscharOptionalRegex.hasMatch(clientId)) {
       throw ArgumentError(
-        'client_id contains invalid characters. Must contain only printable ASCII characters (VSCHAR).',
+        'client_id contains invalid characters. Must contain only printable '
+        'ASCII characters (VSCHAR).',
       );
     }
     if (state != null && !vscharRequiredRegex.hasMatch(state!)) {
       throw ArgumentError(
-        'state contains invalid characters or is empty. Must contain only printable ASCII characters (VSCHAR).',
+        'state contains invalid characters or is empty. Must contain only '
+        'printable ASCII characters (VSCHAR).',
       );
     }
 
@@ -119,8 +124,9 @@ class AuthRequest {
       }
       if (standardKeys.contains(key)) {
         throw ArgumentError(
-          'Parameter collision: authorizationEndpoint contains standard OAuth 2.1 '
-          'parameter "$key" which must be set via the constructor arguments.',
+          'Parameter collision: authorizationEndpoint contains standard '
+          'OAuth 2.1 parameter "$key" which must be set via the constructor '
+          'arguments.',
         );
       }
       allKeys.add(key);
@@ -145,7 +151,8 @@ class AuthRequest {
     customParameters.forEach((key, value) {
       if (standardKeys.contains(key)) {
         throw ArgumentError(
-          'Custom parameter "$key" collides with a standard OAuth 2.1 parameter.',
+          'Custom parameter "$key" collides with a standard OAuth 2.1 '
+          'parameter.',
         );
       }
       if (!allKeys.add(key)) {
@@ -181,7 +188,7 @@ class AuthRequest {
     // Add custom parameters
     queryParams.addAll(customParameters);
 
-    // Omit parameters that do not have a value (empty or whitespace-only values)
+    // Omit parameters that do not have a value (empty or whitespace-only)
     queryParams.removeWhere((key, value) => value.trim().isEmpty);
 
     // Serialize query parameters manually to guarantee order/format,

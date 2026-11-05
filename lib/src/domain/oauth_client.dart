@@ -31,7 +31,8 @@ class OAuthClient {
   /// The request parser port used to process redirect callbacks.
   final OAuthRequestParser requestParser;
 
-  /// The expected issuer identifier used to prevent server mix-up attacks (optional).
+  /// The expected issuer identifier used to prevent server mix-up attacks
+  /// (optional).
   final String? expectedIssuer;
 
   /// Creates a new [OAuthClient] instance.
@@ -45,7 +46,8 @@ class OAuthClient {
     this.expectedIssuer,
   });
 
-  /// Composes a secure front-channel [AuthRequest] for authorization code grant.
+  /// Composes a secure front-channel [AuthRequest] for the authorization code
+  /// grant.
   AuthRequest createAuthorizationRequest({
     required Uri redirectUri,
     required CodeChallenge codeChallenge,
@@ -69,7 +71,8 @@ class OAuthClient {
   /// - Enforces character-for-character state matching to prevent CSRF when
   ///   [expectedState] is provided, or rejects unsolicited `state` parameters
   ///   when [expectedState] is omitted.
-  /// - Validates the `iss` parameter if [expectedIssuer] is defined, preventing server mix-up attacks.
+  /// - Validates the `iss` parameter if [expectedIssuer] is defined, preventing
+  ///   server mix-up attacks.
   ///
   /// Throws [StateError] if validation fails.
   void validateCallback(
@@ -100,14 +103,15 @@ class OAuthClient {
     if (expectedIssuer != null) {
       if (params.iss == null) {
         throw StateError(
-          'Security violation: expected issuer "$expectedIssuer" in redirect callback, '
-          'but the "iss" parameter was missing.',
+          'Security violation: expected issuer "$expectedIssuer" in redirect '
+          'callback, but the "iss" parameter was missing.',
         );
       }
       if (params.iss != expectedIssuer) {
         throw StateError(
-          'Issuer mismatch: expected issuer "$expectedIssuer", but got "${params.iss}". '
-          'Aborting redirect callback processing to prevent server mix-up attack.',
+          'Issuer mismatch: expected issuer "$expectedIssuer", but got '
+          '"${params.iss}". Aborting redirect callback processing to prevent '
+          'server mix-up attack.',
         );
       }
     }
@@ -126,7 +130,8 @@ class OAuthClient {
     return headers;
   }
 
-  /// Exchanges the authorization [code] for access tokens via back-channel POST.
+  /// Exchanges the authorization [code] for access tokens via back-channel
+  /// POST.
   ///
   /// - Accepts [redirectUri] if one was bound to the authorization code.
   Future<TokenResult> exchangeCode({
@@ -172,13 +177,15 @@ class OAuthClient {
     return _sendTokenRequest(body, scope: scope);
   }
 
-  /// Requests an access token using the Client Credentials grant (OAuth 2.1 Section 4.2).
+  /// Requests an access token using the Client Credentials grant (OAuth 2.1
+  /// Section 4.2).
   ///
   /// Requires a confidential client configured with a non-empty [clientSecret].
   Future<TokenResult> exchangeClientCredentials({String? scope}) {
     if (clientSecret == null || clientSecret!.isEmpty) {
       throw StateError(
-        'Client credentials grant requires a confidential client with a non-empty clientSecret.',
+        'Client credentials grant requires a confidential client with a '
+        'non-empty clientSecret.',
       );
     }
 
@@ -216,8 +223,8 @@ class OAuthClient {
   }
 }
 
-/// An HTTP client wrapper that automatically appends the Bearer token to requests
-/// and enforces OAuth 2.1 resource access security constraints.
+/// An HTTP client wrapper that automatically appends the Bearer token to
+/// requests and enforces OAuth 2.1 resource access security constraints.
 ///
 /// Only HTTPS URIs (or loopback HTTP URIs for `localhost`, `127.0.0.1`, `::1`,
 /// and `[::1]`) are permitted. In addition, `request.followRedirects` is
@@ -228,10 +235,11 @@ class OAuthAuthenticatedClient extends http.BaseClient {
   final http.Client _inner;
   final String _accessToken;
 
-  /// The token type scheme prefix to use in the Authorization header (e.g., Bearer, DPoP).
+  /// The token type scheme prefix to use in the Authorization header (e.g.,
+  /// `Bearer`, `DPoP`).
   final String tokenType;
 
-  /// Creates a new [OAuthAuthenticatedClient] wrapping the [_inner] HTTP client.
+  /// Creates a new [OAuthAuthenticatedClient] wrapping [_inner].
   OAuthAuthenticatedClient(
     this._inner,
     this._accessToken, {
@@ -242,7 +250,8 @@ class OAuthAuthenticatedClient extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) {
     final url = request.url;
 
-    // 1. Enforce transport security (HTTPS or loopback HTTP only, valid host, no userinfo/fragment)
+    // 1. Enforce transport security (HTTPS or loopback HTTP only, valid host,
+    // no userinfo/fragment)
     if (!isAllowedHttpEndpointUri(url)) {
       throw ArgumentError.value(
         url,
@@ -254,24 +263,28 @@ class OAuthAuthenticatedClient extends http.BaseClient {
     }
 
     // 2. Enforce query string prohibitions:
-    // "Under no circumstances may an access token be appended to a query parameter string.
-    // If a URL format contains a token query string, the library must reject the resource request execution loop."
+    // "Under no circumstances may an access token be appended to a query
+    // parameter string. If a URL format contains a token query string, the
+    // library must reject the resource request execution loop."
     for (final values in url.queryParametersAll.values) {
       for (final val in values) {
         if (val.contains(_accessToken)) {
           throw StateError(
-            'Security violation: Access token must never be appended to a query parameter string. '
+            'Security violation: Access token must never be appended to a '
+            'query parameter string. '
             'Resource request execution loop rejected.',
           );
         }
       }
     }
 
-    // 3. Prevent automatic redirect following to avoid leaking bearer tokens across redirect hops
+    // 3. Prevent automatic redirect following to avoid leaking bearer tokens
+    // across redirect hops
     request.followRedirects = false;
 
     // 4. Enforce Bearer / Token Type Format:
-    // Pass tokens strictly via the HTTP Authorization request header utilizing the correct scheme.
+    // Pass tokens strictly via the HTTP Authorization request header utilizing
+    // the correct scheme.
     request.headers['Authorization'] = '$tokenType $_accessToken';
 
     return _inner.send(request);

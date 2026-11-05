@@ -58,8 +58,10 @@ bool isAllowedHttpEndpointUri(Uri uri, {bool allowLoopbackHttp = true}) {
 /// redirect URIs must have a scheme, must not contain a fragment or userinfo,
 /// and must use one of:
 /// - `https` with a non-empty host
-/// - `http` with an exact loopback host (`localhost`, `127.0.0.1`, `::1`, `[::1]`)
-/// - A reverse-domain private-use URI scheme matching `^[a-z0-9]+(\.[a-z0-9-]+)+$`
+/// - `http` with an exact loopback host (`localhost`, `127.0.0.1`, `::1`,
+///   `[::1]`)
+/// - A reverse-domain private-use URI scheme matching
+///   `^[a-z0-9]+(\.[a-z0-9-]+)+$`
 bool isAllowedRedirectUri(Uri uri) {
   if (!uri.hasScheme || uri.hasFragment || uri.userInfo.isNotEmpty) {
     return false;

@@ -6,7 +6,8 @@ import '../domain/redirect_uri_policy.dart';
 class HttpAdapter implements OAuthHttpClient {
   final http.Client _client;
 
-  /// Creates a new [HttpAdapter] wrapping the provided `package:http` [http.Client].
+  /// Creates a new [HttpAdapter] wrapping the provided `package:http`
+  /// [http.Client].
   HttpAdapter(this._client);
 
   @override
@@ -15,7 +16,7 @@ class HttpAdapter implements OAuthHttpClient {
     required Map<String, String> body,
     Map<String, String> headers = const {},
   }) async {
-    // 1. Resolve compliance-safe TLS boundaries (Allow loopback HTTP exceptions)
+    // 1. Resolve compliance-safe TLS boundaries (allow loopback HTTP)
     if (!isAllowedHttpEndpointUri(url)) {
       throw ArgumentError.value(
         url,

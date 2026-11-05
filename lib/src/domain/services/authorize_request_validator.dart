@@ -130,7 +130,8 @@ class AuthorizeRequestValidator {
       );
     }
 
-    // 2. Client verification (empty value is treated as omitted per Section 3.1)
+    // 2. Client verification (empty value is treated as omitted per
+    // Section 3.1)
     final clientId = _singleNonEmptyValue(clientIds);
     if (clientId == null) {
       return const AuthorizeDirectError(
@@ -231,7 +232,8 @@ class AuthorizeRequestValidator {
     Uri validatedRedirectUri,
   ) {
     // From this point onward, errors can be redirected back to the client's
-    // validatedRedirectUri. Extract and validate optional "state" (Section 4.1.1).
+    // validatedRedirectUri. Extract and validate optional "state"
+    // (Section 4.1.1).
     final states = params['state'] ?? const [];
     if (states.length > 1) {
       return AuthorizeRedirectableError(
@@ -266,7 +268,8 @@ class AuthorizeRequestValidator {
       }
     }
 
-    // Verify client is authorized for the authorization_code grant (Section 4.1.2.1)
+    // Verify client is authorized for the authorization_code grant
+    // (Section 4.1.2.1)
     if (!client.allowedGrantTypes.contains('authorization_code')) {
       return AuthorizeRedirectableError(
         client: client,

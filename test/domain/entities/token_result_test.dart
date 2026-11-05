@@ -4,9 +4,11 @@ import 'package:test/test.dart';
 void main() {
   group('TokenResult', () {
     const successBody =
-        '{"access_token":"token-123","token_type":"Bearer","expires_in":3600,"refresh_token":"ref-123","scope":"read"}';
+        '{"access_token":"token-123","token_type":"Bearer","expires_in":3600,'
+        '"refresh_token":"ref-123","scope":"read"}';
     const errorBody =
-        '{"error":"invalid_grant","error_description":"Invalid auth code","error_uri":"https://example.com/errors"}';
+        '{"error":"invalid_grant","error_description":"Invalid auth code",'
+        '"error_uri":"https://example.com/errors"}';
 
     group('Cache-Control validation', () {
       test(
@@ -79,10 +81,14 @@ void main() {
         'should reject expires_in passed as a string, zero, negative, or float',
         () {
           for (final badBody in [
-            '{"access_token":"token-123","token_type":"Bearer","expires_in":"7200"}',
-            '{"access_token":"token-123","token_type":"Bearer","expires_in":0}',
-            '{"access_token":"token-123","token_type":"Bearer","expires_in":-10}',
-            '{"access_token":"token-123","token_type":"Bearer","expires_in":3600.5}',
+            '{"access_token":"token-123","token_type":"Bearer",'
+                '"expires_in":"7200"}',
+            '{"access_token":"token-123","token_type":"Bearer",'
+                '"expires_in":0}',
+            '{"access_token":"token-123","token_type":"Bearer",'
+                '"expires_in":-10}',
+            '{"access_token":"token-123","token_type":"Bearer",'
+                '"expires_in":3600.5}',
           ]) {
             expect(
               () => TokenResult.fromResponse(
@@ -96,32 +102,35 @@ void main() {
         },
       );
 
-      test(
-        'should reject non-VSCHAR access_token, non-string/non-VSCHAR refresh_token, or non-string/invalid-ABNF scope',
-        () {
-          for (final badBody in [
-            r'{"access_token":"token\n123","token_type":"Bearer"}',
-            '{"access_token":"token-123","token_type":"Bearer","refresh_token":123}',
-            '{"access_token":"token-123","token_type":"Bearer","refresh_token":""}',
-            r'{"access_token":"token-123","token_type":"Bearer","refresh_token":"ref\n123"}',
-            '{"access_token":"token-123","token_type":"Bearer","scope":["read"]}',
-            '{"access_token":"token-123","token_type":"Bearer","scope":"read  write"}',
-            r'{"access_token":"token-123","token_type":"Bearer","scope":"read\"quote"}',
-          ]) {
-            expect(
-              () => TokenResult.fromResponse(
-                body: badBody,
-                headers: validHeaders,
-              ),
-              throwsFormatException,
-              reason: 'Expected $badBody to throw FormatException',
-            );
-          }
-        },
-      );
+      test('should reject non-VSCHAR access_token, non-string/non-VSCHAR '
+          'refresh_token, or non-string/invalid-ABNF scope', () {
+        for (final badBody in [
+          r'{"access_token":"token\n123","token_type":"Bearer"}',
+          '{"access_token":"token-123","token_type":"Bearer",'
+              '"refresh_token":123}',
+          '{"access_token":"token-123","token_type":"Bearer",'
+              '"refresh_token":""}',
+          '{"access_token":"token-123","token_type":"Bearer",'
+              r'"refresh_token":"ref\n123"}',
+          '{"access_token":"token-123","token_type":"Bearer",'
+              '"scope":["read"]}',
+          '{"access_token":"token-123","token_type":"Bearer",'
+              '"scope":"read  write"}',
+          '{"access_token":"token-123","token_type":"Bearer",'
+              r'"scope":"read\"quote"}',
+        ]) {
+          expect(
+            () =>
+                TokenResult.fromResponse(body: badBody, headers: validHeaders),
+            throwsFormatException,
+            reason: 'Expected $badBody to throw FormatException',
+          );
+        }
+      });
 
       test(
-        'should validate statusCode when provided (200 for success, >=400 for error)',
+        'should validate statusCode when provided (200 for success, >=400 for '
+        'error)',
         () {
           expect(
             TokenResult.fromResponse(
@@ -194,10 +203,12 @@ void main() {
       );
 
       test(
-        'should reject token_type strings containing invalid character points violating ABNF syntax',
+        'should reject token_type strings containing invalid character points '
+        'violating ABNF syntax',
         () {
+          // Contains forbidden space and exclamation point
           const body =
-              '{"access_token":"token-123","token_type":"Invalid Type!"}'; // Contains forbidden space and exclamation point
+              '{"access_token":"token-123","token_type":"Invalid Type!"}';
           expect(
             () => TokenResult.fromResponse(body: body, headers: validHeaders),
             throwsFormatException,
@@ -205,38 +216,38 @@ void main() {
         },
       );
 
-      test(
-        'should successfully parse vendor-specific token types formatted as absolute URIs',
-        () {
-          const body =
-              '{"access_token":"token-123","token_type":"https://example.com/oauth/type"}';
-          final result =
-              TokenResult.fromResponse(body: body, headers: validHeaders)
-                  as TokenSuccess;
-          expect(result.tokenType, equals('https://example.com/oauth/type'));
-        },
-      );
+      test('should successfully parse vendor-specific token types formatted as '
+          'absolute URIs', () {
+        const body =
+            '{"access_token":"token-123",'
+            '"token_type":"https://example.com/oauth/type"}';
+        final result =
+            TokenResult.fromResponse(body: body, headers: validHeaders)
+                as TokenSuccess;
+        expect(result.tokenType, equals('https://example.com/oauth/type'));
+      });
 
       test('should throw FormatException if expires_in is invalid', () {
         const body =
-            '{"access_token":"token-123","token_type":"Bearer","expires_in":"abc"}';
+            '{"access_token":"token-123","token_type":"Bearer",'
+            '"expires_in":"abc"}';
         expect(
           () => TokenResult.fromResponse(body: body, headers: validHeaders),
           throwsFormatException,
         );
       });
 
-      test(
-        'should throw FormatException if numerical parameters suffer from structural JSON type confusion',
-        () {
-          const body =
-              '{"access_token":"token-123","token_type":"Bearer","expires_in":[3600]}'; // Array injection instead of primitive value
-          expect(
-            () => TokenResult.fromResponse(body: body, headers: validHeaders),
-            throwsFormatException,
-          );
-        },
-      );
+      test('should throw FormatException if numerical parameters suffer from '
+          'structural JSON type confusion', () {
+        // Array injection instead of primitive value
+        const body =
+            '{"access_token":"token-123","token_type":"Bearer",'
+            '"expires_in":[3600]}';
+        expect(
+          () => TokenResult.fromResponse(body: body, headers: validHeaders),
+          throwsFormatException,
+        );
+      });
     });
 
     group('error parsing', () {
@@ -264,10 +275,11 @@ void main() {
       );
 
       test(
-        'should reject error responses containing characters violating strict ASCII NQSCHAR syntax',
+        'should reject error responses containing characters violating strict '
+        'ASCII NQSCHAR syntax',
         () {
-          const body =
-              '{"error":"invalid_request\nline"}'; // Contains a malicious newline code point
+          // Contains a malicious newline code point
+          const body = '{"error":"invalid_request\nline"}';
           expect(
             () => TokenResult.fromResponse(body: body, headers: validHeaders),
             throwsFormatException,
@@ -275,23 +287,26 @@ void main() {
         },
       );
 
-      test(
-        'should reject error responses if the error_description contains non-NQSCHAR characters',
-        () {
-          const body =
-              '{"error":"invalid_grant","error_description":"Invalid \n description"}'; // Newline injection
-          expect(
-            () => TokenResult.fromResponse(body: body, headers: validHeaders),
-            throwsFormatException,
-          );
-        },
-      );
+      test('should reject error responses if the error_description contains '
+          'non-NQSCHAR characters', () {
+        // Newline injection
+        const body =
+            '{"error":"invalid_grant",'
+            '"error_description":"Invalid \n description"}';
+        expect(
+          () => TokenResult.fromResponse(body: body, headers: validHeaders),
+          throwsFormatException,
+        );
+      });
 
       test(
-        'should reject error responses if the error_uri violates standard URI syntax characters',
+        'should reject error responses if the error_uri violates standard URI '
+        'syntax characters',
         () {
+          // Space injection in URI
           const body =
-              '{"error":"invalid_grant","error_uri":"https://example.com/space error"}'; // Space injection in URI
+              '{"error":"invalid_grant",'
+              '"error_uri":"https://example.com/space error"}';
           expect(
             () => TokenResult.fromResponse(body: body, headers: validHeaders),
             throwsFormatException,

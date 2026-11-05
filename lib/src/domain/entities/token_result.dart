@@ -12,9 +12,10 @@ sealed class TokenResult {
 
   /// Parses a token endpoint HTTP response.
   ///
-  /// Throws [ArgumentError] if the mandatory `Cache-Control: no-store` header is missing.
-  /// Throws [FormatException] if the body is not valid JSON, lacks mandatory parameters,
-  /// or if [statusCode] conflicts with the response payload type.
+  /// Throws [ArgumentError] if the mandatory `Cache-Control: no-store` header
+  /// is missing.
+  /// Throws [FormatException] if the body is not valid JSON, lacks mandatory
+  /// parameters, or if [statusCode] conflicts with the response payload type.
   factory TokenResult.fromResponse({
     required String body,
     required Map<String, String> headers,
@@ -36,8 +37,9 @@ sealed class TokenResult {
 
     if (!directives.contains('no-store')) {
       throw ArgumentError(
-        'Security violation: Token endpoint responses must be strictly excluded from proxy caches. '
-        'Missing mandatory "Cache-Control: no-store" header. Got: "$cacheControl".',
+        'Security violation: Token endpoint responses must be strictly '
+        'excluded from proxy caches. Missing mandatory '
+        '"Cache-Control: no-store" header. Got: "$cacheControl".',
       );
     }
 
@@ -62,7 +64,8 @@ final RegExp _tokenTypeNameRegex = RegExp(r'^[A-Za-z0-9\-._]+$');
 TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
   if (statusCode != null && statusCode < 400) {
     throw FormatException(
-      'Invalid HTTP status code $statusCode for token error response; expected >= 400.',
+      'Invalid HTTP status code $statusCode for token error response; '
+      'expected >= 400.',
     );
   }
 
@@ -76,7 +79,8 @@ TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
   // Enforce strictly ASCII NQSCHAR syntax: %x20-21 / %x23-5B / %x5D-7E
   if (!nqscharRequiredRegex.hasMatch(error)) {
     throw const FormatException(
-      'Security violation: "error" field contains invalid characters violating ABNF NQSCHAR syntax.',
+      'Security violation: "error" field contains invalid characters '
+      'violating ABNF NQSCHAR syntax.',
     );
   }
 
@@ -86,7 +90,8 @@ TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
           errorDescription.isNotEmpty &&
           !nqscharRequiredRegex.hasMatch(errorDescription))) {
     throw const FormatException(
-      'Security violation: "error_description" field contains invalid characters violating ABNF NQSCHAR syntax.',
+      'Security violation: "error_description" field contains invalid '
+      'characters violating ABNF NQSCHAR syntax.',
     );
   }
 
@@ -94,7 +99,8 @@ TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
   if (errorUri is! String? ||
       (errorUri != null && !isValidErrorUri(errorUri))) {
     throw const FormatException(
-      'Security violation: "error_uri" is not a valid absolute URI or contains invalid characters.',
+      'Security violation: "error_uri" is not a valid absolute URI or '
+      'contains invalid characters.',
     );
   }
 
@@ -108,14 +114,16 @@ TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
 TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
   if (statusCode != null && statusCode != 200) {
     throw FormatException(
-      'Invalid HTTP status code $statusCode for token success response; expected 200.',
+      'Invalid HTTP status code $statusCode for token success response; '
+      'expected 200.',
     );
   }
 
   final accessToken = json['access_token'];
   if (accessToken is! String || !vscharRequiredRegex.hasMatch(accessToken)) {
     throw const FormatException(
-      'Missing or invalid "access_token" in response: must be a non-empty VSCHAR string.',
+      'Missing or invalid "access_token" in response: must be a non-empty '
+      'VSCHAR string.',
     );
   }
 
@@ -124,7 +132,8 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
     throw const FormatException('Missing or invalid "token_type" in response.');
   }
 
-  // Validate token_type (type-name = 1*name-char where name-char = "-" / "." / "_" / DIGIT / ALPHA, or absolute URI)
+  // Validate token_type (type-name = 1*name-char where
+  // name-char = "-" / "." / "_" / DIGIT / ALPHA, or absolute URI)
   final isAbsoluteUri = Uri.tryParse(tokenType)?.isAbsolute ?? false;
   if (!_tokenTypeNameRegex.hasMatch(tokenType) && !isAbsoluteUri) {
     throw FormatException(
@@ -136,7 +145,8 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
   final expiresIn = json['expires_in'];
   if (expiresIn is! int? || (expiresIn != null && expiresIn <= 0)) {
     throw const FormatException(
-      'Invalid "expires_in" parameter in response: must be a positive integer JSON number.',
+      'Invalid "expires_in" parameter in response: must be a positive integer '
+      'JSON number.',
     );
   }
 
@@ -144,7 +154,8 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
   if (refreshToken is! String? ||
       (refreshToken != null && !vscharRequiredRegex.hasMatch(refreshToken))) {
     throw const FormatException(
-      'Invalid "refresh_token" parameter in response: must be a non-empty VSCHAR string.',
+      'Invalid "refresh_token" parameter in response: must be a non-empty '
+      'VSCHAR string.',
     );
   }
 
@@ -152,7 +163,8 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
   if (scope is! String? ||
       (scope != null && !isValidScopeString(scope, allowEmpty: true))) {
     throw const FormatException(
-      'Invalid "scope" parameter in response: must be a String of valid NQCHAR scope tokens.',
+      'Invalid "scope" parameter in response: must be a String of valid '
+      'NQCHAR scope tokens.',
     );
   }
 
@@ -178,7 +190,8 @@ final class TokenSuccess extends TokenResult {
   /// The lifetime in seconds of the access token (optional).
   final int? expiresIn;
 
-  /// The refresh token, which can be used to obtain new access tokens (optional).
+  /// The refresh token, which can be used to obtain new access tokens
+  /// (optional).
   final String? refreshToken;
 
   /// The scope of the access token (optional).
@@ -218,7 +231,8 @@ final class TokenSuccess extends TokenResult {
 
   @override
   String toString() =>
-      'TokenSuccess(tokenType: $tokenType, accessToken: ***, expiresIn: $expiresIn)';
+      'TokenSuccess(tokenType: $tokenType, accessToken: ***, '
+      'expiresIn: $expiresIn)';
 }
 
 /// Represents an OAuth 2.1 protocol error response.
@@ -230,7 +244,8 @@ final class TokenError extends TokenResult {
   /// Human-readable text providing additional information (optional).
   final String? errorDescription;
 
-  /// A URI identifying a human-readable web page with information about the error (optional).
+  /// A URI identifying a human-readable web page with information about the
+  /// error (optional).
   final String? errorUri;
 
   /// Creates a [TokenError] response containing the protocol error details.

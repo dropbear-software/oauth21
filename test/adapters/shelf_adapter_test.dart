@@ -240,7 +240,8 @@ void main() {
       });
 
       test(
-        'should return 303 redirect with mandatory iss on redirectable error (#12)',
+        'should return 303 redirect with mandatory iss on redirectable error '
+        '(#12)',
         () async {
           final req = shelf.Request(
             'GET',
@@ -310,49 +311,45 @@ void main() {
         );
       });
 
-      test(
-        'should omit state when state is null in redirectWithAuthorizationCode (#5)',
-        () {
-          final res = redirectWithAuthorizationCode(
-            redirectUri: Uri.parse('https://example.com/cb'),
-            code: 'auth-code-123',
-            issuer: 'https://auth.example.com',
-          );
+      test('should omit state when state is null in '
+          'redirectWithAuthorizationCode (#5)', () {
+        final res = redirectWithAuthorizationCode(
+          redirectUri: Uri.parse('https://example.com/cb'),
+          code: 'auth-code-123',
+          issuer: 'https://auth.example.com',
+        );
 
-          final parsed = Uri.parse(res.headers['location']!);
-          expect(parsed.queryParameters['code'], equals('auth-code-123'));
-          expect(parsed.queryParameters.containsKey('state'), isFalse);
-          expect(
-            parsed.queryParameters['iss'],
-            equals('https://auth.example.com'),
-          );
-        },
-      );
+        final parsed = Uri.parse(res.headers['location']!);
+        expect(parsed.queryParameters['code'], equals('auth-code-123'));
+        expect(parsed.queryParameters.containsKey('state'), isFalse);
+        expect(
+          parsed.queryParameters['iss'],
+          equals('https://auth.example.com'),
+        );
+      });
 
-      test(
-        'should build 303 error redirect with mandatory iss in redirectWithAuthorizationError (#12)',
-        () {
-          final res = redirectWithAuthorizationError(
-            redirectUri: Uri.parse('https://example.com/cb'),
-            error: 'access_denied',
-            errorDescription: 'User denied access.',
-            issuer: 'https://auth.example.com',
-          );
+      test('should build 303 error redirect with mandatory iss in '
+          'redirectWithAuthorizationError (#12)', () {
+        final res = redirectWithAuthorizationError(
+          redirectUri: Uri.parse('https://example.com/cb'),
+          error: 'access_denied',
+          errorDescription: 'User denied access.',
+          issuer: 'https://auth.example.com',
+        );
 
-          expect(res.statusCode, equals(303));
-          final parsed = Uri.parse(res.headers['location']!);
-          expect(parsed.queryParameters['error'], equals('access_denied'));
-          expect(
-            parsed.queryParameters['error_description'],
-            equals('User denied access.'),
-          );
-          expect(parsed.queryParameters.containsKey('state'), isFalse);
-          expect(
-            parsed.queryParameters['iss'],
-            equals('https://auth.example.com'),
-          );
-        },
-      );
+        expect(res.statusCode, equals(303));
+        final parsed = Uri.parse(res.headers['location']!);
+        expect(parsed.queryParameters['error'], equals('access_denied'));
+        expect(
+          parsed.queryParameters['error_description'],
+          equals('User denied access.'),
+        );
+        expect(parsed.queryParameters.containsKey('state'), isFalse);
+        expect(
+          parsed.queryParameters['iss'],
+          equals('https://auth.example.com'),
+        );
+      });
     });
 
     group('handleTokenRequest', () {
@@ -364,7 +361,8 @@ void main() {
             Uri.parse('https://auth.example.com/token'),
             headers: {'content-type': 'application/x-www-form-urlencoded'},
             body:
-                'grant_type=client_credentials&client_id=client-123&client_secret=secret-123',
+                'grant_type=client_credentials&client_id=client-123'
+                '&client_secret=secret-123',
           );
 
           final res = await handleTokenRequest(req, handler: tokenHandler);
@@ -524,87 +522,83 @@ void main() {
         expect(json['error_description'], contains('Payload too large'));
       });
 
-      test(
-        'should abort chunked stream payload mid-stream if size exceeds 10,240 bytes',
-        () async {
-          var thirdChunkRead = false;
-          Stream<List<int>> chunkedStream() async* {
-            yield List<int>.filled(6000, 65);
-            yield List<int>.filled(6000, 65); // Exceeds 10,240 bytes here
-            thirdChunkRead = true;
-            yield List<int>.filled(6000, 65);
-          }
+      test('should abort chunked stream payload mid-stream if size exceeds '
+          '10,240 bytes', () async {
+        var thirdChunkRead = false;
+        Stream<List<int>> chunkedStream() async* {
+          yield List<int>.filled(6000, 65);
+          yield List<int>.filled(6000, 65); // Exceeds 10,240 bytes here
+          thirdChunkRead = true;
+          yield List<int>.filled(6000, 65);
+        }
 
-          final req = shelf.Request(
-            'POST',
-            Uri.parse('https://auth.example.com/token'),
-            headers: {'content-type': 'application/x-www-form-urlencoded'},
-            body: chunkedStream(),
-          );
+        final req = shelf.Request(
+          'POST',
+          Uri.parse('https://auth.example.com/token'),
+          headers: {'content-type': 'application/x-www-form-urlencoded'},
+          body: chunkedStream(),
+        );
 
-          final res = await handleTokenRequest(
-            req,
-            handler: tokenHandler,
-            isHttps: true,
-          );
-          expect(res.statusCode, equals(400));
-          expect(thirdChunkRead, isFalse);
-          expect(res.headers['cache-control'], equals('no-store'));
-          expect(res.headers['pragma'], equals('no-cache'));
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
+        expect(res.statusCode, equals(400));
+        expect(thirdChunkRead, isFalse);
+        expect(res.headers['cache-control'], equals('no-store'));
+        expect(res.headers['pragma'], equals('no-cache'));
 
-          final json =
-              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
-          expect(json['error'], equals('invalid_request'));
-          expect(json['error_description'], contains('Payload too large'));
-        },
-      );
+        final json =
+            jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+        expect(json['error'], equals('invalid_request'));
+        expect(json['error_description'], contains('Payload too large'));
+      });
 
-      test(
-        'should reject malformed Content-Length, invalid UTF-8 bytes, and malformed percent-encoding without throwing 500',
-        () async {
-          final badContentLengthReq = shelf.Request(
-            'POST',
-            Uri.parse('https://auth.example.com/token'),
-            headers: {
-              'content-type': 'application/x-www-form-urlencoded',
-              'content-length': '-5',
-            },
-            body: 'grant_type=client_credentials',
-          );
-          final resBadLen = await handleTokenRequest(
-            badContentLengthReq,
-            handler: tokenHandler,
-            isHttps: true,
-          );
-          expect(resBadLen.statusCode, equals(400));
+      test('should reject malformed Content-Length, invalid UTF-8 bytes, and '
+          'malformed percent-encoding without throwing 500', () async {
+        final badContentLengthReq = shelf.Request(
+          'POST',
+          Uri.parse('https://auth.example.com/token'),
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+            'content-length': '-5',
+          },
+          body: 'grant_type=client_credentials',
+        );
+        final resBadLen = await handleTokenRequest(
+          badContentLengthReq,
+          handler: tokenHandler,
+          isHttps: true,
+        );
+        expect(resBadLen.statusCode, equals(400));
 
-          final invalidUtf8Req = shelf.Request(
-            'POST',
-            Uri.parse('https://auth.example.com/token'),
-            headers: {'content-type': 'application/x-www-form-urlencoded'},
-            body: Stream.value(<int>[0xFF, 0xFE, 0xFD]),
-          );
-          final resInvalidUtf8 = await handleTokenRequest(
-            invalidUtf8Req,
-            handler: tokenHandler,
-            isHttps: true,
-          );
-          expect(resInvalidUtf8.statusCode, equals(400));
+        final invalidUtf8Req = shelf.Request(
+          'POST',
+          Uri.parse('https://auth.example.com/token'),
+          headers: {'content-type': 'application/x-www-form-urlencoded'},
+          body: Stream.value(<int>[0xFF, 0xFE, 0xFD]),
+        );
+        final resInvalidUtf8 = await handleTokenRequest(
+          invalidUtf8Req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
+        expect(resInvalidUtf8.statusCode, equals(400));
 
-          final badPercentReq = shelf.Request(
-            'POST',
-            Uri.parse('https://auth.example.com/token'),
-            headers: {'content-type': 'application/x-www-form-urlencoded'},
-            body: 'grant_type=%ZZ&client_id=client-123',
-          );
-          final resBadPercent = await handleTokenRequest(
-            badPercentReq,
-            handler: tokenHandler,
-            isHttps: true,
-          );
-          expect(resBadPercent.statusCode, equals(400));
-        },
-      );
+        final badPercentReq = shelf.Request(
+          'POST',
+          Uri.parse('https://auth.example.com/token'),
+          headers: {'content-type': 'application/x-www-form-urlencoded'},
+          body: 'grant_type=%ZZ&client_id=client-123',
+        );
+        final resBadPercent = await handleTokenRequest(
+          badPercentReq,
+          handler: tokenHandler,
+          isHttps: true,
+        );
+        expect(resBadPercent.statusCode, equals(400));
+      });
 
       test('should handle url-encoded parameter without equals sign', () async {
         final req = shelf.Request(
@@ -644,48 +638,47 @@ void main() {
         );
       });
 
-      test(
-        'should attach AccessToken to request context and preserve request body stream for downstream POST handlers',
-        () async {
-          final handler = const shelf.Pipeline()
-              .addMiddleware(
-                bearerAuthenticationMiddleware(
-                  validator: bearerValidator,
-                  requiredScopes: {'read'},
-                  isHttps: true,
-                ),
-              )
-              .addHandler((req) async {
-                final token = getAccessTokenFromContext(req);
-                final payload = await req.readAsString();
-                return shelf.Response.ok(
-                  jsonEncode({
-                    'user': token?.userId,
-                    'client': token?.clientId,
-                    'payload': payload,
-                  }),
-                );
-              });
+      test('should attach AccessToken to request context and preserve request '
+          'body stream for downstream POST handlers', () async {
+        final handler = const shelf.Pipeline()
+            .addMiddleware(
+              bearerAuthenticationMiddleware(
+                validator: bearerValidator,
+                requiredScopes: {'read'},
+                isHttps: true,
+              ),
+            )
+            .addHandler((req) async {
+              final token = getAccessTokenFromContext(req);
+              final payload = await req.readAsString();
+              return shelf.Response.ok(
+                jsonEncode({
+                  'user': token?.userId,
+                  'client': token?.clientId,
+                  'payload': payload,
+                }),
+              );
+            });
 
-          final req = shelf.Request(
-            'POST',
-            Uri.parse('https://resource.example.com/items'),
-            headers: {'Authorization': 'Bearer $rawToken'},
-            body: '{"name":"widget"}',
-          );
+        final req = shelf.Request(
+          'POST',
+          Uri.parse('https://resource.example.com/items'),
+          headers: {'Authorization': 'Bearer $rawToken'},
+          body: '{"name":"widget"}',
+        );
 
-          final res = await handler(req);
-          expect(res.statusCode, equals(200));
-          final body =
-              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
-          expect(body['user'], equals('user-789'));
-          expect(body['client'], equals('client-123'));
-          expect(body['payload'], equals('{"name":"widget"}'));
-        },
-      );
+        final res = await handler(req);
+        expect(res.statusCode, equals(200));
+        final body =
+            jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+        expect(body['user'], equals('user-789'));
+        expect(body['client'], equals('client-123'));
+        expect(body['payload'], equals('{"name":"widget"}'));
+      });
 
       test(
-        'should ignore ?access_token=... in URI query parameters and return 401 with bare WWW-Authenticate when Authorization header is absent',
+        'should ignore ?access_token=... in URI query parameters and return '
+        '401 with bare WWW-Authenticate when Authorization header is absent',
         () async {
           final handler = const shelf.Pipeline()
               .addMiddleware(
@@ -713,36 +706,34 @@ void main() {
         },
       );
 
-      test(
-        'should return 403 insufficient_scope with JSON error body when requiredScopes are not met',
-        () async {
-          final handler = const shelf.Pipeline()
-              .addMiddleware(
-                bearerAuthenticationMiddleware(
-                  validator: bearerValidator,
-                  requiredScopes: {'admin'},
-                  isHttps: true,
-                ),
-              )
-              .addHandler((_) => shelf.Response.ok('secret'));
+      test('should return 403 insufficient_scope with JSON error body when '
+          'requiredScopes are not met', () async {
+        final handler = const shelf.Pipeline()
+            .addMiddleware(
+              bearerAuthenticationMiddleware(
+                validator: bearerValidator,
+                requiredScopes: {'admin'},
+                isHttps: true,
+              ),
+            )
+            .addHandler((_) => shelf.Response.ok('secret'));
 
-          final req = shelf.Request(
-            'GET',
-            Uri.parse('https://resource.example.com/admin'),
-            headers: {'Authorization': 'Bearer $rawToken'},
-          );
+        final req = shelf.Request(
+          'GET',
+          Uri.parse('https://resource.example.com/admin'),
+          headers: {'Authorization': 'Bearer $rawToken'},
+        );
 
-          final res = await handler(req);
-          expect(res.statusCode, equals(403));
-          expect(
-            res.headers['www-authenticate'],
-            contains('error="insufficient_scope"'),
-          );
-          final body =
-              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
-          expect(body['error'], equals('insufficient_scope'));
-        },
-      );
+        final res = await handler(req);
+        expect(res.statusCode, equals(403));
+        expect(
+          res.headers['www-authenticate'],
+          contains('error="insufficient_scope"'),
+        );
+        final body =
+            jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+        expect(body['error'], equals('insufficient_scope'));
+      });
     });
   });
 }

@@ -103,7 +103,9 @@ void main() {
     });
 
     test(
-      'should return 401 with bare WWW-Authenticate: Bearer and no error code when Authorization header is missing, empty, or non-Bearer (Section 5.3.1)',
+      'should return 401 with bare WWW-Authenticate: Bearer and no error code '
+      'when Authorization header is missing, empty, or non-Bearer '
+      '(Section 5.3.1)',
       () async {
         for (final header in [null, '', '   ', 'Basic dXNlcjpwYXNz']) {
           final res = await validator.validate(
@@ -119,33 +121,31 @@ void main() {
       },
     );
 
-    test(
-      'should include custom realm in WWW-Authenticate header and validate realm NQSCHAR ABNF',
-      () async {
-        final realmValidator = BearerTokenValidator(
+    test('should include custom realm in WWW-Authenticate header and validate '
+        'realm NQSCHAR ABNF', () async {
+      final realmValidator = BearerTokenValidator(
+        tokenRepository: tokenRepo,
+        cryptoService: crypto,
+        realm: 'api.example.com',
+      );
+      final res = await realmValidator.validate(isHttps: true);
+      expect(res, isA<BearerTokenInvalid>());
+      final invalid = res as BearerTokenInvalid;
+      expect(invalid.statusCode, equals(401));
+      expect(
+        invalid.headers['WWW-Authenticate'],
+        equals('Bearer realm="api.example.com"'),
+      );
+
+      expect(
+        () => BearerTokenValidator(
           tokenRepository: tokenRepo,
           cryptoService: crypto,
-          realm: 'api.example.com',
-        );
-        final res = await realmValidator.validate(isHttps: true);
-        expect(res, isA<BearerTokenInvalid>());
-        final invalid = res as BearerTokenInvalid;
-        expect(invalid.statusCode, equals(401));
-        expect(
-          invalid.headers['WWW-Authenticate'],
-          equals('Bearer realm="api.example.com"'),
-        );
-
-        expect(
-          () => BearerTokenValidator(
-            tokenRepository: tokenRepo,
-            cryptoService: crypto,
-            realm: 'bad"realm',
-          ),
-          throwsArgumentError,
-        );
-      },
-    );
+          realm: 'bad"realm',
+        ),
+        throwsArgumentError,
+      );
+    });
 
     test(
       'should reject multiple Authorization headers with 400 invalid_request',
@@ -240,42 +240,38 @@ void main() {
       },
     );
 
-    test(
-      'should return 403 insufficient_scope when requiredScopes are not satisfied',
-      () async {
-        final res = await validator.validate(
-          authorizationHeader: 'Bearer $validRawToken',
-          requiredScopes: {'read', 'admin'},
-          isHttps: true,
-        );
-        expect(res, isA<BearerTokenInvalid>());
-        final invalid = res as BearerTokenInvalid;
-        expect(invalid.statusCode, equals(403));
-        expect(invalid.errorCode, equals('insufficient_scope'));
-        expect(
-          invalid.headers['WWW-Authenticate'],
-          contains('error="insufficient_scope"'),
-        );
-        expect(
-          invalid.headers['WWW-Authenticate'],
-          contains('scope="read admin"'),
-        );
-      },
-    );
+    test('should return 403 insufficient_scope when requiredScopes are not '
+        'satisfied', () async {
+      final res = await validator.validate(
+        authorizationHeader: 'Bearer $validRawToken',
+        requiredScopes: {'read', 'admin'},
+        isHttps: true,
+      );
+      expect(res, isA<BearerTokenInvalid>());
+      final invalid = res as BearerTokenInvalid;
+      expect(invalid.statusCode, equals(403));
+      expect(invalid.errorCode, equals('insufficient_scope'));
+      expect(
+        invalid.headers['WWW-Authenticate'],
+        contains('error="insufficient_scope"'),
+      );
+      expect(
+        invalid.headers['WWW-Authenticate'],
+        contains('scope="read admin"'),
+      );
+    });
 
-    test(
-      'should succeed with 200 and return AccessToken when token and scopes are valid (case-insensitive bearer prefix)',
-      () async {
-        final res = await validator.validate(
-          authorizationHeader: 'bearer $validRawToken',
-          requiredScopes: {'read', 'write'},
-          isHttps: true,
-        );
-        expect(res, isA<BearerTokenValid>());
-        final valid = res as BearerTokenValid;
-        expect(valid.accessToken.clientId, equals('client-1'));
-        expect(valid.accessToken.userId, equals('user-1'));
-      },
-    );
+    test('should succeed with 200 and return AccessToken when token and scopes '
+        'are valid (case-insensitive bearer prefix)', () async {
+      final res = await validator.validate(
+        authorizationHeader: 'bearer $validRawToken',
+        requiredScopes: {'read', 'write'},
+        isHttps: true,
+      );
+      expect(res, isA<BearerTokenValid>());
+      final valid = res as BearerTokenValid;
+      expect(valid.accessToken.clientId, equals('client-1'));
+      expect(valid.accessToken.userId, equals('user-1'));
+    });
   });
 }

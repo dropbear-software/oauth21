@@ -73,31 +73,29 @@ void main() {
       },
     );
 
-    test(
-      'should reject redirectUri containing dot-segments or reserved query parameters (#10)',
-      () {
-        for (final badRedirect in [
-          'https://client.example.com/evil/..%2fcallback',
-          'https://client.example.com/.%2fcallback',
-          'https://client.example.com/callback?code=123',
-          'https://client.example.com/callback?state=abc',
-          'https://client.example.com/callback?iss=https://auth.example.com',
-          'https://client.example.com/callback?error=invalid_request',
-          'https://client.example.com/callback?foo=1&foo=2',
-        ]) {
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: Uri.parse(badRedirect),
-              codeChallenge: codeChallenge,
-            ),
-            throwsArgumentError,
-            reason: 'Expected $badRedirect to be rejected',
-          );
-        }
-      },
-    );
+    test('should reject redirectUri containing dot-segments or reserved query '
+        'parameters (#10)', () {
+      for (final badRedirect in [
+        'https://client.example.com/evil/..%2fcallback',
+        'https://client.example.com/.%2fcallback',
+        'https://client.example.com/callback?code=123',
+        'https://client.example.com/callback?state=abc',
+        'https://client.example.com/callback?iss=https://auth.example.com',
+        'https://client.example.com/callback?error=invalid_request',
+        'https://client.example.com/callback?foo=1&foo=2',
+      ]) {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: Uri.parse(badRedirect),
+            codeChallenge: codeChallenge,
+          ),
+          throwsArgumentError,
+          reason: 'Expected $badRedirect to be rejected',
+        );
+      }
+    });
 
     test('should reject redirect URI containing fragment', () {
       final invalidRedirect = Uri.parse(
@@ -159,7 +157,8 @@ void main() {
     );
 
     test(
-      'should preserve existing query parameters on authorization endpoint if no collision',
+      'should preserve existing query parameters on authorization endpoint if '
+      'no collision',
       () {
         final request = AuthRequest(
           authorizationEndpoint: '$authEndpoint?tenant=1234',
@@ -175,70 +174,62 @@ void main() {
       },
     );
 
-    test(
-      'should reject if existing endpoint parameters duplicate/pollute each other',
-      () {
-        expect(
-          () => AuthRequest(
-            authorizationEndpoint: '$authEndpoint?tenant=1234&tenant=5678',
-            clientId: clientId,
-            redirectUri: redirectUri,
-            state: stateToken,
-            codeChallenge: codeChallenge,
-          ),
-          throwsArgumentError,
-        );
-      },
-    );
+    test('should reject if existing endpoint parameters duplicate/pollute each '
+        'other', () {
+      expect(
+        () => AuthRequest(
+          authorizationEndpoint: '$authEndpoint?tenant=1234&tenant=5678',
+          clientId: clientId,
+          redirectUri: redirectUri,
+          state: stateToken,
+          codeChallenge: codeChallenge,
+        ),
+        throwsArgumentError,
+      );
+    });
 
-    test(
-      'should reject if existing endpoint parameters collide with standard parameters',
-      () {
-        expect(
-          () => AuthRequest(
-            authorizationEndpoint: '$authEndpoint?client_id=pre-existing',
-            clientId: clientId,
-            redirectUri: redirectUri,
-            state: stateToken,
-            codeChallenge: codeChallenge,
-          ),
-          throwsArgumentError,
-        );
-      },
-    );
+    test('should reject if existing endpoint parameters collide with standard '
+        'parameters', () {
+      expect(
+        () => AuthRequest(
+          authorizationEndpoint: '$authEndpoint?client_id=pre-existing',
+          clientId: clientId,
+          redirectUri: redirectUri,
+          state: stateToken,
+          codeChallenge: codeChallenge,
+        ),
+        throwsArgumentError,
+      );
+    });
 
-    test(
-      'should reject if existing endpoint contains standard parameter response_type',
-      () {
-        expect(
-          () => AuthRequest(
-            authorizationEndpoint: '$authEndpoint?response_type=code',
-            clientId: clientId,
-            redirectUri: redirectUri,
-            state: stateToken,
-            codeChallenge: codeChallenge,
-          ),
-          throwsArgumentError,
-        );
-      },
-    );
+    test('should reject if existing endpoint contains standard parameter '
+        'response_type', () {
+      expect(
+        () => AuthRequest(
+          authorizationEndpoint: '$authEndpoint?response_type=code',
+          clientId: clientId,
+          redirectUri: redirectUri,
+          state: stateToken,
+          codeChallenge: codeChallenge,
+        ),
+        throwsArgumentError,
+      );
+    });
 
-    test(
-      'should reject if custom parameters collide with existing endpoint parameters',
-      () {
-        expect(
-          () => AuthRequest(
-            authorizationEndpoint: '$authEndpoint?tenant=1234',
-            clientId: clientId,
-            redirectUri: redirectUri,
-            state: stateToken,
-            codeChallenge: codeChallenge,
-            customParameters: {'tenant': 'collision'},
-          ),
-          throwsArgumentError,
-        );
-      },
-    );
+    test('should reject if custom parameters collide with existing endpoint '
+        'parameters', () {
+      expect(
+        () => AuthRequest(
+          authorizationEndpoint: '$authEndpoint?tenant=1234',
+          clientId: clientId,
+          redirectUri: redirectUri,
+          state: stateToken,
+          codeChallenge: codeChallenge,
+          customParameters: {'tenant': 'collision'},
+        ),
+        throwsArgumentError,
+      );
+    });
 
     group('TLS rules & loopback exception', () {
       test('should reject non-https authorizationEndpoint', () {
@@ -306,40 +297,37 @@ void main() {
         );
       });
 
-      test(
-        'should allow valid private-use URI schemes for native application redirection',
-        () {
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: Uri.parse('com.example.app:/oauth2redirect'),
-              state: stateToken,
-              codeChallenge: codeChallenge,
-            ),
-            returnsNormally,
-          );
-        },
-      );
+      test('should allow valid private-use URI schemes for native application '
+          'redirection', () {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: Uri.parse('com.example.app:/oauth2redirect'),
+            state: stateToken,
+            codeChallenge: codeChallenge,
+          ),
+          returnsNormally,
+        );
+      });
+
+      test('should reject private-use URI schemes that do not contain a period '
+          'character', () {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: Uri.parse('myapp:/oauth2redirect'),
+            state: stateToken,
+            codeChallenge: codeChallenge,
+          ),
+          throwsArgumentError,
+        );
+      });
 
       test(
-        'should reject private-use URI schemes that do not contain a period character',
-        () {
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: Uri.parse('myapp:/oauth2redirect'),
-              state: stateToken,
-              codeChallenge: codeChallenge,
-            ),
-            throwsArgumentError,
-          );
-        },
-      );
-
-      test(
-        'should reject dangerous redirect URI schemes, malformed dot schemes, and userinfo in redirectUri or authorizationEndpoint',
+        'should reject dangerous redirect URI schemes, malformed dot schemes, '
+        'and userinfo in redirectUri or authorizationEndpoint',
         () {
           for (final badRedirect in [
             'javascript:alert(1)',
@@ -382,39 +370,38 @@ void main() {
         },
       );
 
-      test(
-        'should reject http scheme for fake loopback domains or incorrect subdomains',
-        () {
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: Uri.parse(
-                'http://localhost.attacker.com:3000/callback',
-              ),
-              state: stateToken,
-              codeChallenge: codeChallenge,
+      test('should reject http scheme for fake loopback domains or incorrect '
+          'subdomains', () {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: Uri.parse(
+              'http://localhost.attacker.com:3000/callback',
             ),
-            throwsArgumentError,
-          );
+            state: stateToken,
+            codeChallenge: codeChallenge,
+          ),
+          throwsArgumentError,
+        );
 
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: Uri.parse('http://127.0.0.2:8080/callback'),
-              state: stateToken,
-              codeChallenge: codeChallenge,
-            ),
-            throwsArgumentError,
-          );
-        },
-      );
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: Uri.parse('http://127.0.0.2:8080/callback'),
+            state: stateToken,
+            codeChallenge: codeChallenge,
+          ),
+          throwsArgumentError,
+        );
+      });
     });
 
     group('VSCHAR Syntax Enforcement', () {
       test(
-        'should reject state parameter containing invalid non-VSCHAR control characters',
+        'should reject state parameter containing invalid non-VSCHAR control '
+        'characters',
         () {
           expect(
             () => AuthRequest(
@@ -445,7 +432,8 @@ void main() {
 
     group('Omitted parameter handling', () {
       test(
-        'should completely omit parameters with empty values from serialized query',
+        'should completely omit parameters with empty values from serialized '
+        'query',
         () {
           final request = AuthRequest(
             authorizationEndpoint: authEndpoint,
@@ -554,34 +542,32 @@ void main() {
         );
       });
 
-      test(
-        'should reject scope string containing leading or trailing space characters',
-        () {
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: redirectUri,
-              state: stateToken,
-              codeChallenge: codeChallenge,
-              scope: ' read write', // Leading space
-            ),
-            throwsArgumentError,
-          );
+      test('should reject scope string containing leading or trailing space '
+          'characters', () {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: redirectUri,
+            state: stateToken,
+            codeChallenge: codeChallenge,
+            scope: ' read write', // Leading space
+          ),
+          throwsArgumentError,
+        );
 
-          expect(
-            () => AuthRequest(
-              authorizationEndpoint: authEndpoint,
-              clientId: clientId,
-              redirectUri: redirectUri,
-              state: stateToken,
-              codeChallenge: codeChallenge,
-              scope: 'read write ', // Trailing space
-            ),
-            throwsArgumentError,
-          );
-        },
-      );
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: redirectUri,
+            state: stateToken,
+            codeChallenge: codeChallenge,
+            scope: 'read write ', // Trailing space
+          ),
+          throwsArgumentError,
+        );
+      });
     });
   });
 }

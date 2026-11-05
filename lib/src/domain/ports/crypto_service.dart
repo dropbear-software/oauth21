@@ -6,7 +6,8 @@ abstract interface class CryptoService {
   /// The resulting string must have a guessing probability <= 2^-128.
   String generateRandomEntropyString([int bits = 256]);
 
-  /// Computes the SHA-256 hash of the input string, returning its hex representation.
+  /// Computes the SHA-256 hash of the input string, returning its hex
+  /// representation.
   String hashString(String input);
 
   /// Computes the SHA-256 hash of the input string and base64url encodes it.

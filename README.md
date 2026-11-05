@@ -1,32 +1,78 @@
 # OAuth 2.1 for Dart
 
-A pure, platform-agnostic Dart library implementing the **OAuth 2.1 Authorization Framework** (obsoleting RFC 6749 and RFC 6750). Designed with **Clean Architecture** principles, this package provides robust, compliance-hardened components for building both **OAuth 2.1 Clients** and **OAuth 2.1 Authorization Servers**.
+A pure, platform-agnostic Dart library implementing the **OAuth 2.1
+Authorization Framework** (obsoleting RFC 6749 and RFC 6750). Designed with
+**Clean Architecture** principles, this package provides robust,
+compliance-hardened components for building both **OAuth 2.1 Clients** and
+**OAuth 2.1 Authorization Servers**.
 
-This package contains zero platform-specific dependencies (no `dart:io` or Flutter locks) and has a minimal supply chain, depending only on the native Dart SDK, `package:http`, `package:crypto`, `package:meta`, and `package:shelf` (for server adapters).
+This package contains zero platform-specific dependencies (no `dart:io` or
+Flutter locks) and has a minimal supply chain, depending only on the native Dart
+SDK, `package:http`, `package:crypto`, `package:meta`, and `package:shelf` (for
+server adapters).
 
 ---
 
 ## 🏆 Key Security & Compliance Guarantees
 
-This library implements strict, defensive validations to guarantee compile-time and runtime security matching the OAuth 2.1 specification:
+This library implements strict, defensive validations to guarantee compile-time
+and runtime security matching the OAuth 2.1 specification:
 
-*   🔒 **Mandatory PKCE (S256 Exclusively)**: Plain PKCE is completely removed across client and server flows (`CodeChallenge.s256`, `AuthCode`, `AuthorizeRequestValidator`, and `TokenRequestHandler`) to enforce cryptographic SHA-256 code challenge verification in constant time.
-*   🛡️ **TLS & Redirection Scheme Rules**: Enforces `https` for redirect URIs, token endpoints, and authenticated resource calls, with `request.followRedirects = false` enforced on `OAuthAuthenticatedClient`. Cleartext HTTP is allowed exclusively on local loopback interfaces (`127.0.0.1`, `[::1]`, `::1`, or `localhost`). Native application private-use schemes are permitted *only* when they follow reverse-domain dot notation (e.g. `com.example.app:/callback`), blocking dangerous schemes (`javascript:`, `data:`, `file:`).
-*   📊 **Parameter Pollution Interception**: Fully generalizable check that throws an error (client) or rejects with `invalid_request` (server) if *any* parameter key (such as `code`, `state`, `client_id`, or `redirect_uri`) is duplicated in query parameters or POST bodies.
-*   🧼 **ABNF Syntax Character Filters**: Protects application log components and downstream storage from parameter injection attacks by validating parameter values against strict ABNF ranges:
-    *   `state` and `code` must contain only printable ASCII `VSCHAR` characters (`%x20-7E`).
-    *   `error` and `error_description` must contain only `NQSCHAR` characters (`%x20-21 / %x23-5B / %x5D-7E`), explicitly banning control characters, raw newlines, carriage returns, unescaped double quotes, and backslashes.
-*   🚫 **Deep Token Leakage Prevention**: Under no circumstances may an access token be appended to a query parameter string. The `OAuthAuthenticatedClient` wrapper performs a deep scan of the request URI and rejects request execution if the access token value is detected inside *any* query parameter value, preventing accidental URL channel leakages.
-*   💾 **Cache-Control Enforcements**: Rejects client token response payloads that lack the `Cache-Control: no-store` header to prevent credentials from being persisted to disk. The server-side token handler ensures all token endpoint responses strictly return `Cache-Control: no-store` and `Pragma: no-cache`.
-*   🔄 **Refresh Token Rotation (RTR) with Grace Window**: Enforces Refresh Token Rotation specifically targeting public clients (and optionally confidential clients). The server-side token handler automatically invalidates the parent refresh token upon rotation. If a token replay is detected, the handler revokes the entire downstream token family tree. It features a 30-second concurrency grace window allowing single-retry requests to succeed during transient network failures.
-*   🚨 **Case-Insensitive Header Normalization**: Downcases all outbound header keys in `HttpAdapter` to prevent Case-Sensitive Header Map Duplication, resolving Header Field Modification vulnerabilities.
-*   📦 **Heap-Space DoS & Parameter Pollution Defense**: The Shelf adapter enforces a 10 KB payload size ceiling and validates parameters at the raw query string/byte stream level before map flattening.
+*   🔒 **Mandatory PKCE (S256 Exclusively)**: Plain PKCE is completely removed
+    across client and server flows (`CodeChallenge.s256`, `AuthCode`,
+    `AuthorizeRequestValidator`, and `TokenRequestHandler`) to enforce
+    cryptographic SHA-256 code challenge verification in constant time.
+*   🛡️ **TLS & Redirection Scheme Rules**: Enforces `https` for redirect
+    URIs, token endpoints, and authenticated resource calls, with
+    `request.followRedirects = false` enforced on `OAuthAuthenticatedClient`.
+    Cleartext HTTP is allowed exclusively on local loopback interfaces
+    (`127.0.0.1`, `[::1]`, `::1`, or `localhost`). Native application
+    private-use schemes are permitted *only* when they follow reverse-domain dot
+    notation (e.g. `com.example.app:/callback`), blocking dangerous schemes
+    (`javascript:`, `data:`, `file:`).
+*   📊 **Parameter Pollution Interception**: Fully generalizable check that
+    throws an error (client) or rejects with `invalid_request` (server) if *any*
+    parameter key (such as `code`, `state`, `client_id`, or `redirect_uri`) is
+    duplicated in query parameters or POST bodies.
+*   🧼 **ABNF Syntax Character Filters**: Protects application log components
+    and downstream storage from parameter injection attacks by validating
+    parameter values against strict ABNF ranges:
+    *   `state` and `code` must contain only printable ASCII `VSCHAR` characters
+        (`%x20-7E`).
+    *   `error` and `error_description` must contain only `NQSCHAR` characters
+        (`%x20-21 / %x23-5B / %x5D-7E`), explicitly banning control characters,
+        raw newlines, carriage returns, unescaped double quotes, and
+        backslashes.
+*   🚫 **Deep Token Leakage Prevention**: Under no circumstances may an access
+    token be appended to a query parameter string. The
+    `OAuthAuthenticatedClient` wrapper performs a deep scan of the request URI
+    and rejects request execution if the access token value is detected inside
+    *any* query parameter value, preventing accidental URL channel leakages.
+*   💾 **Cache-Control Enforcements**: Rejects client token response payloads
+    that lack the `Cache-Control: no-store` header to prevent credentials from
+    being persisted to disk. The server-side token handler ensures all token
+    endpoint responses strictly return `Cache-Control: no-store` and
+    `Pragma: no-cache`.
+*   🔄 **Refresh Token Rotation (RTR) with Grace Window**: Enforces Refresh
+    Token Rotation specifically targeting public clients (and optionally
+    confidential clients). The server-side token handler automatically
+    invalidates the parent refresh token upon rotation. If a token replay is
+    detected, the handler revokes the entire downstream token family tree. It
+    features a 30-second concurrency grace window allowing single-retry requests
+    to succeed during transient network failures.
+*   🚨 **Case-Insensitive Header Normalization**: Downcases all outbound
+    header keys in `HttpAdapter` to prevent Case-Sensitive Header Map
+    Duplication, resolving Header Field Modification vulnerabilities.
+*   📦 **Heap-Space DoS & Parameter Pollution Defense**: The Shelf adapter
+    enforces a 10 KB payload size ceiling and validates parameters at the raw
+    query string/byte stream level before map flattening.
 
 ---
 
 ## 🏗️ Clean Architecture Layout
 
-The package structure separates the core, pure domain rules from infrastructure and delivery adapters:
+The package structure separates the core, pure domain rules from infrastructure
+and delivery adapters:
 
 ```mermaid
 graph TD
@@ -39,8 +85,14 @@ graph TD
     Adapters --> Domain
 ```
 
-- **Domain Layer** (`lib/src/domain/`): Houses the pure protocol value objects (`CodeVerifier`, `CodeChallenge`), entities (`AuthRequest`, `TokenResult`, `ClientRegistration`, `AuthCode`, `RefreshToken`), and abstract ports/repositories (`ClientRepository`, `AuthCodeRepository`, `TokenRepository`, `CryptoService`, `OAuthHttpClient`).
-- **Adapters Layer** (`lib/src/adapters/`): Adapts platform-specific dependencies (e.g. `package:http` for client HTTP requests and `package:shelf` for server adapters).
+- **Domain Layer** (`lib/src/domain/`): Houses the pure protocol value objects
+  (`CodeVerifier`, `CodeChallenge`), entities (`AuthRequest`, `TokenResult`,
+  `ClientRegistration`, `AuthCode`, `RefreshToken`), and abstract
+  ports/repositories (`ClientRepository`, `AuthCodeRepository`,
+  `TokenRepository`, `CryptoService`, `OAuthHttpClient`).
+- **Adapters Layer** (`lib/src/adapters/`): Adapts platform-specific
+  dependencies (e.g. `package:http` for client HTTP requests and `package:shelf`
+  for server adapters).
 
 ---
 
@@ -54,10 +106,14 @@ dependencies:
     path: ./path/to/oauth21 # or via pub.dev once published
 ```
 
-This package exposes specialized entry points depending on your runtime environment:
-- 📱 **Client Applications**: Import `package:oauth21/client.dart` to access core client flow APIs.
-- 🖥️ **Authorization Servers**: Import `package:oauth21/server.dart` to access validators, handlers, and Shelf adapters.
-- 📦 **Umbrella Exporter**: Import `package:oauth21/oauth21.dart` to export both client and server APIs simultaneously.
+This package exposes specialized entry points depending on your runtime
+environment:
+- 📱 **Client Applications**: Import `package:oauth21/client.dart` to access
+  core client flow APIs.
+- 🖥️ **Authorization Servers**: Import `package:oauth21/server.dart` to
+  access validators, handlers, and Shelf adapters.
+- 📦 **Umbrella Exporter**: Import `package:oauth21/oauth21.dart` to export
+  both client and server APIs simultaneously.
 
 ---
 
@@ -66,7 +122,8 @@ This package exposes specialized entry points depending on your runtime environm
 To build a client application, start by importing `package:oauth21/client.dart`.
 
 ### 1. Initialize the OAuth 2.1 Client
-Create the core coordinator using the standard `HttpAdapter` (or provide your own platform port):
+Create the core coordinator using the standard `HttpAdapter` (or provide your
+own platform port):
 
 ```dart
 import 'package:http/http.dart' as http;
@@ -79,12 +136,14 @@ final oauthClient = OAuthClient(
   tokenEndpoint: 'https://auth.example.com/token',
   clientId: 'my-client-id',
   httpClient: HttpAdapter(httpClient),
-  expectedIssuer: 'https://auth.example.com', // Optional: prevents mix-up attacks
+  // Optional: prevents mix-up attacks
+  expectedIssuer: 'https://auth.example.com',
 );
 ```
 
 ### 2. Generate PKCE Secrets
-Create cryptographically secure entropy keys and compute the mandatory SHA-256 challenge:
+Create cryptographically secure entropy keys and compute the mandatory SHA-256
+challenge:
 
 ```dart
 import 'package:oauth21/client.dart';
@@ -93,7 +152,7 @@ final codeVerifier = CodeVerifier.generate();
 final codeChallenge = CodeChallenge.s256(codeVerifier);
 
 print('Verifier: ${codeVerifier.value}'); // Masked in toString()
-print('Challenge: ${codeChallenge.value}'); // Encoded using unpadded base64url
+print('Challenge: ${codeChallenge.value}'); // Unpadded base64url
 ```
 
 ### 3. Build the Front-Channel Authorization Request
@@ -114,13 +173,16 @@ final authorizationUrl = authRequest.toUri();
 ```
 
 ### 4. Parse & Validate Redirect Callbacks
-Once the server redirects the user back, use `DefaultRequestParser` to safely process parameters:
+Once the server redirects the user back, use `DefaultRequestParser` to safely
+process parameters:
 
 ```dart
 import 'package:oauth21/client.dart';
 
 final callbackUri = Uri.parse(
-  'https://client.example.com/callback?code=auth-code-123&state=secure-random-state&iss=https%3A%2F%2Fauth.example.com',
+  'https://client.example.com/callback'
+  '?code=auth-code-123&state=secure-random-state'
+  '&iss=https%3A%2F%2Fauth.example.com',
 );
 
 const parser = DefaultRequestParser();
@@ -163,7 +225,8 @@ if (redirectParams.code != null) {
 ```
 
 ### 6. Make Authenticated API Requests
-Use the `OAuthAuthenticatedClient` wrapper to automatically inject token headers and prevent query leakage:
+Use the `OAuthAuthenticatedClient` wrapper to automatically inject token headers
+and prevent query leakage:
 
 ```dart
 import 'package:oauth21/client.dart';
@@ -190,7 +253,8 @@ To build an Authorization Server, import `package:oauth21/server.dart`.
 
 ### 1. Implement Server Repository Ports
 
-Implement the database and state tracking interfaces defined in the domain layer:
+Implement the database and state tracking interfaces defined in the domain
+layer:
 
 ```dart
 import 'package:oauth21/server.dart';
@@ -211,7 +275,7 @@ class MyAuthCodeRepository implements AuthCodeRepository {
 
   @override
   Future<bool> tryConsume(String code) async {
-    // Atomically mark unused, non-expired code as used and return true on transition
+    // Atomically mark unused, non-expired code as used and return true
   }
 }
 
@@ -251,22 +315,28 @@ class MyTokenRepository implements TokenRepository {
   Future<void> revokeRefreshTokenByHash(String hash) async { ... }
 
   @override
-  Future<void> revokeAllTokensForClientAndUser(String clientId, String? userId) async {
-    // Cascading revocation of all client-user tokens on refresh token replay detection
+  Future<void> revokeAllTokensForClientAndUser(
+    String clientId,
+    String? userId,
+  ) async {
+    // Cascading revocation of all client-user tokens on replay detection
   }
 }
 ```
 
 ### 2. Validate Authorization Endpoint Requests
 
-Use `AuthorizeRequestValidator` to validate incoming parameters at the authorization endpoint. This validator separates **redirectable** and **non-redirectable** errors to prevent open-redirect phishing vectors.
+Use `AuthorizeRequestValidator` to validate incoming parameters at the
+authorization endpoint. This validator separates **redirectable** and
+**non-redirectable** errors to prevent open-redirect phishing vectors.
 
 ```dart
 import 'package:oauth21/server.dart';
 
 final validator = AuthorizeRequestValidator(myClientRepository);
 
-// params is a Map<String, List<String>> (e.g. request.requestedUri.queryParametersAll)
+// params is a Map<String, List<String>>
+// (e.g. request.requestedUri.queryParametersAll)
 final result = await validator.validate(params);
 
 switch (result) {
@@ -280,7 +350,8 @@ switch (result) {
     :final errorDescription,
     :final state,
   ):
-    // Safely redirect the user agent back to client's redirect URI with the error parameters
+    // Safely redirect the user agent back to client's redirect URI with the
+    // error parameters
     final errorUri = validatedRedirectUri.replace(
       queryParameters: {
         'error': errorCode,
@@ -290,14 +361,16 @@ switch (result) {
     );
 
   case AuthorizeDirectError(:final errorDescription):
-    // Show error directly on screen (e.g., 400 Bad Request) to prevent open-redirection
+    // Show error directly on screen (e.g., 400 Bad Request) to prevent
+    // open-redirection
     print('Fatal error: $errorDescription');
 }
 ```
 
 ### 3. Process Token Endpoint Requests
 
-Use `TokenRequestHandler` to handle token requests (Authorization Code, Refresh Token, and Client Credentials grants) securely.
+Use `TokenRequestHandler` to handle token requests (Authorization Code, Refresh
+Token, and Client Credentials grants) securely.
 
 ```dart
 import 'package:oauth21/server.dart';
@@ -323,7 +396,8 @@ final response = await tokenHandler.handle(
 
 ## 🌐 Shelf Adapter Middleware
 
-Import `package:oauth21/server.dart` to use the built-in Shelf handlers to easily plug OAuth 2.1 compliance into a Shelf routing setup:
+Import `package:oauth21/server.dart` to use the built-in Shelf handlers to
+easily plug OAuth 2.1 compliance into a Shelf routing setup:
 
 ```dart
 import 'package:shelf/shelf.dart' as shelf;
@@ -364,7 +438,8 @@ router.post('/token', (shelf.Request request) {
 
 ## 🧪 Running Tests & Diagnostics
 
-To run the complete validation test suite (conforming to the OAuth 2.1 specification):
+To run the complete validation test suite (conforming to the OAuth 2.1
+specification):
 
 ```bash
 dart test

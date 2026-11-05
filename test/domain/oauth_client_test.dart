@@ -111,22 +111,20 @@ void main() {
         expectedIssuer: 'https://auth.example.com',
       );
 
-      test(
-        'should pass state verification when states match character-for-character',
-        () {
-          final params = OAuthRedirectParameters(
-            code: 'code123',
-            state: stateToken,
-          );
-          expect(
-            () => clientNoIssuer.validateCallback(
-              params,
-              expectedState: stateToken,
-            ),
-            returnsNormally,
-          );
-        },
-      );
+      test('should pass state verification when states match '
+          'character-for-character', () {
+        final params = OAuthRedirectParameters(
+          code: 'code123',
+          state: stateToken,
+        );
+        expect(
+          () => clientNoIssuer.validateCallback(
+            params,
+            expectedState: stateToken,
+          ),
+          returnsNormally,
+        );
+      });
 
       test('should fail CSRF verification when states do not match', () {
         final params = OAuthRedirectParameters(
@@ -153,25 +151,23 @@ void main() {
         );
       });
 
-      test(
-        'should succeed when expectedState is omitted and callback has no state, and reject unsolicited state (#5)',
-        () {
-          const paramsWithoutState = OAuthRedirectParameters(code: 'code123');
-          expect(
-            () => clientNoIssuer.validateCallback(paramsWithoutState),
-            returnsNormally,
-          );
+      test('should succeed when expectedState is omitted and callback has no '
+          'state, and reject unsolicited state (#5)', () {
+        const paramsWithoutState = OAuthRedirectParameters(code: 'code123');
+        expect(
+          () => clientNoIssuer.validateCallback(paramsWithoutState),
+          returnsNormally,
+        );
 
-          const paramsWithUnsolicitedState = OAuthRedirectParameters(
-            code: 'code123',
-            state: 'unsolicited-state',
-          );
-          expect(
-            () => clientNoIssuer.validateCallback(paramsWithUnsolicitedState),
-            throwsStateError,
-          );
-        },
-      );
+        const paramsWithUnsolicitedState = OAuthRedirectParameters(
+          code: 'code123',
+          state: 'unsolicited-state',
+        );
+        expect(
+          () => clientNoIssuer.validateCallback(paramsWithUnsolicitedState),
+          throwsStateError,
+        );
+      });
 
       test(
         'should pass issuer verification when iss matches expectedIssuer',
@@ -191,26 +187,25 @@ void main() {
         },
       );
 
-      test(
-        'should fail issuer verification when iss matches but has different casing/characters',
-        () {
-          final params = OAuthRedirectParameters(
-            code: 'code123',
-            state: stateToken,
-            iss: 'https://auth.example.com/other',
-          );
-          expect(
-            () => clientWithIssuer.validateCallback(
-              params,
-              expectedState: stateToken,
-            ),
-            throwsStateError,
-          );
-        },
-      );
+      test('should fail issuer verification when iss matches but has different '
+          'casing/characters', () {
+        final params = OAuthRedirectParameters(
+          code: 'code123',
+          state: stateToken,
+          iss: 'https://auth.example.com/other',
+        );
+        expect(
+          () => clientWithIssuer.validateCallback(
+            params,
+            expectedState: stateToken,
+          ),
+          throwsStateError,
+        );
+      });
 
       test(
-        'should fail issuer verification when expectedIssuer is set but iss is missing',
+        'should fail issuer verification when expectedIssuer is set but iss is '
+        'missing',
         () {
           final params = OAuthRedirectParameters(
             code: 'code123',
@@ -291,72 +286,69 @@ void main() {
         expect(result, isA<TokenSuccess>());
       });
 
-      test(
-        'should include Basic authentication header if clientSecret is provided',
-        () async {
-          final httpClient = MockOAuthHttpClient((url, headers, body) async {
-            expect(
-              headers['Authorization'],
-              equals('Basic Y2xpZW50LTEyMzpzZWNyZXQtNDU2'),
-            );
-            return const OAuthHttpResponse(
-              statusCode: 200,
-              body: '{"access_token": "token123", "token_type": "Bearer"}',
-              headers: {'Cache-Control': 'no-store'},
-            );
-          });
-
-          final client = OAuthClient(
-            authorizationEndpoint: authEndpoint,
-            tokenEndpoint: tokenEndpoint,
-            clientId: clientId,
-            clientSecret: 'secret-456',
-            httpClient: httpClient,
+      test('should include Basic authentication header if clientSecret is '
+          'provided', () async {
+        final httpClient = MockOAuthHttpClient((url, headers, body) async {
+          expect(
+            headers['Authorization'],
+            equals('Basic Y2xpZW50LTEyMzpzZWNyZXQtNDU2'),
           );
-
-          final result = await client.exchangeCode(
-            code: 'auth-code',
-            codeVerifier: codeVerifier,
+          return const OAuthHttpResponse(
+            statusCode: 200,
+            body: '{"access_token": "token123", "token_type": "Bearer"}',
+            headers: {'Cache-Control': 'no-store'},
           );
-          expect(result, isA<TokenSuccess>());
-        },
-      );
+        });
 
-      test(
-        'should strictly form-encode client ID and secret separately before generating Basic auth token',
-        () async {
-          final httpClient = MockOAuthHttpClient((url, headers, body) async {
-            // client ID: 'client:id' -> 'client%3Aid'
-            // client secret: 'sec&ret' -> 'sec%26ret'
-            // Joined: 'client%3Aid:sec%26ret' -> Base64 encoded
-            expect(
-              headers['Authorization'],
-              equals('Basic Y2xpZW50JTNBaWQ6c2VjJTI2cmV0'),
-            );
-            return const OAuthHttpResponse(
-              statusCode: 200,
-              body: '{"access_token":"t1","token_type":"Bearer"}',
-              headers: {'Cache-Control': 'no-store'},
-            );
-          });
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: clientId,
+          clientSecret: 'secret-456',
+          httpClient: httpClient,
+        );
 
-          final client = OAuthClient(
-            authorizationEndpoint: authEndpoint,
-            tokenEndpoint: tokenEndpoint,
-            clientId: 'client:id',
-            clientSecret: 'sec&ret',
-            httpClient: httpClient,
+        final result = await client.exchangeCode(
+          code: 'auth-code',
+          codeVerifier: codeVerifier,
+        );
+        expect(result, isA<TokenSuccess>());
+      });
+
+      test('should strictly form-encode client ID and secret separately before '
+          'generating Basic auth token', () async {
+        final httpClient = MockOAuthHttpClient((url, headers, body) async {
+          // client ID: 'client:id' -> 'client%3Aid'
+          // client secret: 'sec&ret' -> 'sec%26ret'
+          // Joined: 'client%3Aid:sec%26ret' -> Base64 encoded
+          expect(
+            headers['Authorization'],
+            equals('Basic Y2xpZW50JTNBaWQ6c2VjJTI2cmV0'),
           );
-
-          await client.exchangeCode(
-            code: 'auth-code',
-            codeVerifier: codeVerifier,
+          return const OAuthHttpResponse(
+            statusCode: 200,
+            body: '{"access_token":"t1","token_type":"Bearer"}',
+            headers: {'Cache-Control': 'no-store'},
           );
-        },
-      );
+        });
+
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: 'client:id',
+          clientSecret: 'sec&ret',
+          httpClient: httpClient,
+        );
+
+        await client.exchangeCode(
+          code: 'auth-code',
+          codeVerifier: codeVerifier,
+        );
+      });
 
       test(
-        'should reject mismatched HTTP status codes in exchangeCode response (#7)',
+        'should reject mismatched HTTP status codes in exchangeCode response '
+        '(#7)',
         () {
           final httpClient = MockOAuthHttpClient((url, headers, body) async {
             return const OAuthHttpResponse(
@@ -385,50 +377,49 @@ void main() {
     });
 
     group('exchangeRefreshToken & exchangeClientCredentials (#7)', () {
-      test(
-        'exchangeRefreshToken should send optional scope and validate refreshToken and scope ABNF',
-        () async {
-          final httpClient = MockOAuthHttpClient((url, headers, body) async {
-            expect(body['grant_type'], equals('refresh_token'));
-            expect(body['refresh_token'], equals('valid-refresh-token'));
-            expect(body['scope'], equals('read'));
-            return const OAuthHttpResponse(
-              statusCode: 200,
-              body: '{"access_token": "t1", "token_type": "Bearer"}',
-              headers: {'Cache-Control': 'no-store'},
-            );
-          });
-
-          final client = OAuthClient(
-            authorizationEndpoint: authEndpoint,
-            tokenEndpoint: tokenEndpoint,
-            clientId: clientId,
-            httpClient: httpClient,
+      test('exchangeRefreshToken should send optional scope and validate '
+          'refreshToken and scope ABNF', () async {
+        final httpClient = MockOAuthHttpClient((url, headers, body) async {
+          expect(body['grant_type'], equals('refresh_token'));
+          expect(body['refresh_token'], equals('valid-refresh-token'));
+          expect(body['scope'], equals('read'));
+          return const OAuthHttpResponse(
+            statusCode: 200,
+            body: '{"access_token": "t1", "token_type": "Bearer"}',
+            headers: {'Cache-Control': 'no-store'},
           );
+        });
 
-          final res = await client.exchangeRefreshToken(
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: clientId,
+          httpClient: httpClient,
+        );
+
+        final res = await client.exchangeRefreshToken(
+          'valid-refresh-token',
+          scope: 'read',
+        );
+        expect(res, isA<TokenSuccess>());
+
+        expect(() => client.exchangeRefreshToken(''), throwsArgumentError);
+        expect(
+          () => client.exchangeRefreshToken('bad\ntoken'),
+          throwsArgumentError,
+        );
+        expect(
+          () => client.exchangeRefreshToken(
             'valid-refresh-token',
-            scope: 'read',
-          );
-          expect(res, isA<TokenSuccess>());
-
-          expect(() => client.exchangeRefreshToken(''), throwsArgumentError);
-          expect(
-            () => client.exchangeRefreshToken('bad\ntoken'),
-            throwsArgumentError,
-          );
-          expect(
-            () => client.exchangeRefreshToken(
-              'valid-refresh-token',
-              scope: 'read  write',
-            ),
-            throwsArgumentError,
-          );
-        },
-      );
+            scope: 'read  write',
+          ),
+          throwsArgumentError,
+        );
+      });
 
       test(
-        'exchangeClientCredentials should authenticate via Basic Auth, support optional scope, and throw StateError for public clients',
+        'exchangeClientCredentials should authenticate via Basic Auth, support '
+        'optional scope, and throw StateError for public clients',
         () async {
           final httpClient = MockOAuthHttpClient((url, headers, body) async {
             expect(body['grant_type'], equals('client_credentials'));
@@ -491,7 +482,9 @@ void main() {
     });
 
     test(
-      'should reject remote cleartext HTTP, spoofed localhost, userinfo, and fragment URLs while permitting loopback HTTP and disabling followRedirects',
+      'should reject remote cleartext HTTP, spoofed localhost, userinfo, and '
+      'fragment URLs while permitting loopback HTTP and disabling '
+      'followRedirects',
       () async {
         final mockInner = MockClient((request) async {
           expect(request.followRedirects, isFalse);
@@ -525,7 +518,8 @@ void main() {
     );
 
     test(
-      'should dynamically append the correct token type scheme prefix to the authorization header',
+      'should dynamically append the correct token type scheme prefix to the '
+      'authorization header',
       () async {
         final mockInner = MockClient((request) async {
           expect(
@@ -548,49 +542,49 @@ void main() {
       },
     );
 
-    test('should reject request if the access token is in a query parameter', () {
-      final mockInner = MockClient((request) async {
-        return http.Response('OK', 200);
-      });
-
-      final authClient = OAuthAuthenticatedClient(mockInner, token);
-
-      // Attempting to send access token in query string should throw StateError immediately
-      expect(
-        () => authClient.get(
-          Uri.parse('https://api.example.com/user?access_token=$token'),
-        ),
-        throwsStateError,
-      );
-
-      expect(
-        () => authClient.get(
-          Uri.parse('https://api.example.com/user?token=$token'),
-        ),
-        throwsStateError,
-      );
-    });
-
     test(
-      'should reject request if the sensitive token value is leaked inside any query parameter value',
+      'should reject request if the access token is in a query parameter',
       () {
-        final mockInner = MockClient(
-          (request) async => http.Response('OK', 200),
-        );
-        final authClient = OAuthAuthenticatedClient(
-          mockInner,
-          'secret-token-val',
+        final mockInner = MockClient((request) async {
+          return http.Response('OK', 200);
+        });
+
+        final authClient = OAuthAuthenticatedClient(mockInner, token);
+
+        // Attempting to send access token in query string should throw
+        // StateError immediately.
+        expect(
+          () => authClient.get(
+            Uri.parse('https://api.example.com/user?access_token=$token'),
+          ),
+          throwsStateError,
         );
 
         expect(
           () => authClient.get(
-            Uri.parse(
-              'https://api.example.com/user?custom_key=secret-token-val',
-            ), // Custom parameter leaking value
+            Uri.parse('https://api.example.com/user?token=$token'),
           ),
           throwsStateError,
         );
       },
     );
+
+    test('should reject request if the sensitive token value is leaked inside '
+        'any query parameter value', () {
+      final mockInner = MockClient((request) async => http.Response('OK', 200));
+      final authClient = OAuthAuthenticatedClient(
+        mockInner,
+        'secret-token-val',
+      );
+
+      expect(
+        () => authClient.get(
+          Uri.parse(
+            'https://api.example.com/user?custom_key=secret-token-val',
+          ), // Custom parameter leaking value
+        ),
+        throwsStateError,
+      );
+    });
   });
 }

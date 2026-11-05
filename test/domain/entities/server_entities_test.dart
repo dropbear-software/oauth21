@@ -60,47 +60,46 @@ void main() {
         },
       );
 
-      test(
-        'should reject dangerous and malformed redirect URI schemes while accepting valid HTTPS, loopback HTTP, and reverse-domain private-use schemes',
-        () {
-          for (final badUri in [
-            'javascript:alert(1)',
-            'data:text/html,hi',
-            'file:///etc/passwd',
-            'http://example.com/cb',
-            'https://user:pass@example.com/cb',
-            'myapp:/cb',
-            'app.:/cb',
-            'com..app:/cb',
-          ]) {
-            expect(
-              () => ClientRegistration(
-                clientId: 'client-123',
-                clientType: ClientType.confidential,
-                clientSecretHash: 'hash',
-                redirectUris: {Uri.parse(badUri)},
-                allowedScopes: {'read'},
-              ),
-              throwsArgumentError,
-              reason: 'Expected $badUri to be rejected',
-            );
-          }
-
-          final validClient = ClientRegistration(
-            clientId: 'client-123',
-            clientType: ClientType.public,
-            redirectUris: {
-              Uri.parse('https://example.com/cb'),
-              Uri.parse('http://localhost:8080/cb'),
-              Uri.parse('http://127.0.0.1:8080/cb'),
-              Uri.parse('http://[::1]:8080/cb'),
-              Uri.parse('com.example.app:/cb'),
-            },
-            allowedScopes: {'read'},
+      test('should reject dangerous and malformed redirect URI schemes while '
+          'accepting valid HTTPS, loopback HTTP, and reverse-domain '
+          'private-use schemes', () {
+        for (final badUri in [
+          'javascript:alert(1)',
+          'data:text/html,hi',
+          'file:///etc/passwd',
+          'http://example.com/cb',
+          'https://user:pass@example.com/cb',
+          'myapp:/cb',
+          'app.:/cb',
+          'com..app:/cb',
+        ]) {
+          expect(
+            () => ClientRegistration(
+              clientId: 'client-123',
+              clientType: ClientType.confidential,
+              clientSecretHash: 'hash',
+              redirectUris: {Uri.parse(badUri)},
+              allowedScopes: {'read'},
+            ),
+            throwsArgumentError,
+            reason: 'Expected $badUri to be rejected',
           );
-          expect(validClient.redirectUris.length, equals(5));
-        },
-      );
+        }
+
+        final validClient = ClientRegistration(
+          clientId: 'client-123',
+          clientType: ClientType.public,
+          redirectUris: {
+            Uri.parse('https://example.com/cb'),
+            Uri.parse('http://localhost:8080/cb'),
+            Uri.parse('http://127.0.0.1:8080/cb'),
+            Uri.parse('http://[::1]:8080/cb'),
+            Uri.parse('com.example.app:/cb'),
+          },
+          allowedScopes: {'read'},
+        );
+        expect(validClient.redirectUris.length, equals(5));
+      });
 
       test(
         'should enforce strict immutability on configuration collections',
@@ -128,24 +127,23 @@ void main() {
         },
       );
 
-      test(
-        'should reject clientId containing invalid non-VSCHAR control characters',
-        () {
-          expect(
-            () => ClientRegistration(
-              clientId: 'client\nid', // Contains a newline character
-              clientType: ClientType.confidential,
-              clientSecretHash: 'hash',
-              redirectUris: {Uri.parse('https://example.com/cb')},
-              allowedScopes: {'read'},
-            ),
-            throwsArgumentError,
-          );
-        },
-      );
+      test('should reject clientId containing invalid non-VSCHAR control '
+          'characters', () {
+        expect(
+          () => ClientRegistration(
+            clientId: 'client\nid', // Contains a newline character
+            clientType: ClientType.confidential,
+            clientSecretHash: 'hash',
+            redirectUris: {Uri.parse('https://example.com/cb')},
+            allowedScopes: {'read'},
+          ),
+          throwsArgumentError,
+        );
+      });
 
       test(
-        'should reject allowedScopes containing individual tokens that violate ABNF character rules',
+        'should reject allowedScopes containing individual tokens that violate '
+        'ABNF character rules',
         () {
           expect(
             () => ClientRegistration(
@@ -238,23 +236,21 @@ void main() {
         expect(expiredCode.isExpired, isTrue);
       });
 
-      test(
-        'should reject auth code if the code string contains invalid non-VSCHAR characters',
-        () {
-          expect(
-            () => AuthCode(
-              code: 'malformed\ncode', // Newline injection
-              clientId: 'client-1',
-              redirectUri: Uri.parse('https://example.com/cb'),
-              userId: 'user-1',
-              codeChallenge: 'challenge-1',
-              codeChallengeMethod: 'S256',
-              expiresAt: future,
-            ),
-            throwsArgumentError,
-          );
-        },
-      );
+      test('should reject auth code if the code string contains invalid '
+          'non-VSCHAR characters', () {
+        expect(
+          () => AuthCode(
+            code: 'malformed\ncode', // Newline injection
+            clientId: 'client-1',
+            redirectUri: Uri.parse('https://example.com/cb'),
+            userId: 'user-1',
+            codeChallenge: 'challenge-1',
+            codeChallengeMethod: 'S256',
+            expiresAt: future,
+          ),
+          throwsArgumentError,
+        );
+      });
 
       test('should reject empty or pure whitespace auth code strings', () {
         expect(
@@ -454,7 +450,8 @@ void main() {
       });
 
       test(
-        'should evaluate overall lifecycle validity combined with revocation flags',
+        'should evaluate overall lifecycle validity combined with revocation '
+        'flags',
         () {
           final original = AccessToken(
             tokenHash: 'hash-1',
@@ -539,7 +536,8 @@ void main() {
       });
 
       test(
-        'should evaluate overall lifecycle validity combined with revocation flags',
+        'should evaluate overall lifecycle validity combined with revocation '
+        'flags',
         () {
           final original = RefreshToken(
             tokenHash: 'hash-1',

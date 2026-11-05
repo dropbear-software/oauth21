@@ -120,7 +120,8 @@ void main() {
     const redirectUri = 'https://client.example.com/callback';
 
     test(
-      'executes authorization request, callback validation, code exchange, and authenticated API call',
+      'executes authorization request, callback validation, code exchange, and '
+      'authenticated API call',
       () async {
         // 1. Generate PKCE values
         final verifier = CodeVerifier.generate();
@@ -147,7 +148,8 @@ void main() {
         // 3. Mock incoming callback redirect from authorization server
         const authCode = 'splat-auth-code-123';
         final callbackUri = Uri.parse(
-          '$redirectUri?code=$authCode&state=$state&iss=https%3A%2F%2Fauth.example.com',
+          '$redirectUri?code=$authCode&state=$state'
+          '&iss=https%3A%2F%2Fauth.example.com',
         );
 
         // Setup parser and parse redirect URL
@@ -176,11 +178,13 @@ void main() {
             expect(bodyParams['code'], equals(authCode));
             expect(bodyParams['code_verifier'], equals(verifier.value));
             expect(bodyParams['client_id'], equals(clientId));
-            // Redirect URI must be present in token request if bound to authorization code
+            // Redirect URI must be present in token request if bound to
+            // authorization code
             expect(bodyParams['redirect_uri'], equals(redirectUri));
 
             return http.Response(
-              '{"access_token": "secret-access-token-999", "token_type": "Bearer", "expires_in": 3600}',
+              '{"access_token": "secret-access-token-999", '
+              '"token_type": "Bearer", "expires_in": 3600}',
               200,
               headers: {'Cache-Control': 'no-store'},
             );
@@ -236,11 +240,13 @@ void main() {
         expect(apiResponse.statusCode, equals(200));
         expect(apiResponse.body, contains('success'));
 
-        // 7. Security check: make sure token is rejected if passed as a query parameter
+        // 7. Security check: make sure token is rejected if passed as a query
+        // parameter
         expect(
           () => authenticatedClient.get(
             Uri.parse(
-              'https://api.example.com/data?access_token=secret-access-token-999',
+              'https://api.example.com/data'
+              '?access_token=secret-access-token-999',
             ),
           ),
           throwsStateError,
@@ -289,162 +295,161 @@ void main() {
       expect(success.refreshToken, equals('new-refresh-token'));
     });
 
-    test(
-      'executes end-to-end flow without state on /authorize, without redirect_uri on /token, and accesses Shelf resource protected by bearerAuthenticationMiddleware (#4, #5, #9, #12)',
-      () async {
-        final crypto = _IntegrationCrypto();
-        final clientRepo = _IntegrationClientRepo();
-        final authCodeRepo = _IntegrationAuthCodeRepo();
-        final tokenRepo = _IntegrationTokenRepo();
+    test('executes end-to-end flow without state on /authorize, without '
+        'redirect_uri on /token, and accesses Shelf resource protected by '
+        'bearerAuthenticationMiddleware (#4, #5, #9, #12)', () async {
+      final crypto = _IntegrationCrypto();
+      final clientRepo = _IntegrationClientRepo();
+      final authCodeRepo = _IntegrationAuthCodeRepo();
+      final tokenRepo = _IntegrationTokenRepo();
 
-        clientRepo.clients[clientId] = ClientRegistration(
-          clientId: clientId,
-          clientType: ClientType.confidential,
-          clientSecretHash: crypto.hashString(clientSecret),
-          redirectUris: {Uri.parse(redirectUri)},
-          allowedScopes: {'read', 'write'},
-          allowedGrantTypes: {'authorization_code', 'refresh_token'},
-        );
+      clientRepo.clients[clientId] = ClientRegistration(
+        clientId: clientId,
+        clientType: ClientType.confidential,
+        clientSecretHash: crypto.hashString(clientSecret),
+        redirectUris: {Uri.parse(redirectUri)},
+        allowedScopes: {'read', 'write'},
+        allowedGrantTypes: {'authorization_code', 'refresh_token'},
+      );
 
-        final authorizeValidator = AuthorizeRequestValidator(clientRepo);
-        final tokenHandler = TokenRequestHandler(
-          clientRepository: clientRepo,
-          authCodeRepository: authCodeRepo,
-          tokenRepository: tokenRepo,
-          cryptoService: crypto,
-        );
-        final bearerValidator = BearerTokenValidator(
-          tokenRepository: tokenRepo,
-          cryptoService: crypto,
-        );
+      final authorizeValidator = AuthorizeRequestValidator(clientRepo);
+      final tokenHandler = TokenRequestHandler(
+        clientRepository: clientRepo,
+        authCodeRepository: authCodeRepo,
+        tokenRepository: tokenRepo,
+        cryptoService: crypto,
+      );
+      final bearerValidator = BearerTokenValidator(
+        tokenRepository: tokenRepo,
+        cryptoService: crypto,
+      );
 
-        final protectedResourceHandler = const shelf.Pipeline()
-            .addMiddleware(
-              bearerAuthenticationMiddleware(
-                validator: bearerValidator,
-                requiredScopes: {'read'},
-                isHttps: true,
-              ),
-            )
-            .addHandler((req) {
-              final token = getAccessTokenFromContext(req);
-              return shelf.Response.ok(
-                jsonEncode({'userId': token?.userId, 'scope': token?.scope}),
-                headers: {'Content-Type': 'application/json'},
-              );
-            });
-
-        final verifier = CodeVerifier.generate();
-        final challenge = CodeChallenge.s256(verifier);
-
-        final oauthClient = OAuthClient(
-          authorizationEndpoint: authEndpoint,
-          tokenEndpoint: tokenEndpoint,
-          clientId: clientId,
-          clientSecret: clientSecret,
-          expectedIssuer: 'https://auth.example.com',
-          httpClient: HttpAdapter(
-            MockClient((req) async {
-              final shelfReq = shelf.Request(
-                req.method,
-                req.url,
-                headers: req.headers,
-                body: req.body,
-              );
-              final shelfRes = await handleTokenRequest(
-                shelfReq,
-                handler: tokenHandler,
-                isHttps: true,
-              );
-              return http.Response(
-                await shelfRes.readAsString(),
-                shelfRes.statusCode,
-                headers: shelfRes.headers,
-              );
-            }),
-          ),
-        );
-
-        // 1. Create authorization request without state (#5)
-        final authReq = oauthClient.createAuthorizationRequest(
-          redirectUri: Uri.parse(redirectUri),
-          codeChallenge: challenge,
-          scope: 'read',
-        );
-        expect(authReq.state, isNull);
-
-        // 2. Validate on Shelf /authorize endpoint and issue redirect (#12)
-        final shelfAuthReq = shelf.Request('GET', authReq.toUri());
-        final shelfAuthRes = await handleAuthorizeRequest(
-          shelfAuthReq,
-          validator: authorizeValidator,
-          issuer: 'https://auth.example.com',
-          onConsentRequired: (req, result) async {
-            const issuedCode = 'code-no-state-123';
-            await authCodeRepo.save(
-              AuthCode(
-                code: issuedCode,
-                clientId: result.client.clientId,
-                redirectUri: result.validatedRedirectUri,
-                userId: 'user-e2e',
-                codeChallenge: result.codeChallenge,
-                codeChallengeMethod: result.codeChallengeMethod,
-                expiresAt: DateTime.now().add(const Duration(minutes: 5)),
-                scope: result.requestedScopes.join(' '),
-              ),
+      final protectedResourceHandler = const shelf.Pipeline()
+          .addMiddleware(
+            bearerAuthenticationMiddleware(
+              validator: bearerValidator,
+              requiredScopes: {'read'},
+              isHttps: true,
+            ),
+          )
+          .addHandler((req) {
+            final token = getAccessTokenFromContext(req);
+            return shelf.Response.ok(
+              jsonEncode({'userId': token?.userId, 'scope': token?.scope}),
+              headers: {'Content-Type': 'application/json'},
             );
-            return redirectWithAuthorizationCode(
-              redirectUri: result.validatedRedirectUri,
-              code: issuedCode,
-              issuer: 'https://auth.example.com',
-              state: result.state,
-            );
-          },
-        );
-        expect(shelfAuthRes.statusCode, equals(303));
-        final callbackLocation = Uri.parse(shelfAuthRes.headers['location']!);
-        expect(callbackLocation.queryParameters.containsKey('state'), isFalse);
+          });
 
-        // 3. Parse and validate callback without expectedState (#5)
-        final callbackParams = oauthClient.requestParser.parseRedirect(
-          callbackLocation,
-        );
-        oauthClient.validateCallback(callbackParams);
+      final verifier = CodeVerifier.generate();
+      final challenge = CodeChallenge.s256(verifier);
 
-        // 4. Exchange code without redirectUri (#4)
-        final tokenResult = await oauthClient.exchangeCode(
-          code: callbackParams.code!,
-          codeVerifier: verifier,
-        );
-        expect(tokenResult, isA<TokenSuccess>());
-        final tokenSuccess = tokenResult as TokenSuccess;
-
-        // 5. Call Shelf protected resource using OAuthAuthenticatedClient (#9)
-        final resourceHttpClient = OAuthAuthenticatedClient(
+      final oauthClient = OAuthClient(
+        authorizationEndpoint: authEndpoint,
+        tokenEndpoint: tokenEndpoint,
+        clientId: clientId,
+        clientSecret: clientSecret,
+        expectedIssuer: 'https://auth.example.com',
+        httpClient: HttpAdapter(
           MockClient((req) async {
             final shelfReq = shelf.Request(
               req.method,
               req.url,
               headers: req.headers,
+              body: req.body,
             );
-            final shelfRes = await protectedResourceHandler(shelfReq);
+            final shelfRes = await handleTokenRequest(
+              shelfReq,
+              handler: tokenHandler,
+              isHttps: true,
+            );
             return http.Response(
               await shelfRes.readAsString(),
               shelfRes.statusCode,
               headers: shelfRes.headers,
             );
           }),
-          tokenSuccess.accessToken,
-        );
+        ),
+      );
 
-        final apiRes = await resourceHttpClient.get(
-          Uri.parse('https://api.example.com/profile'),
-        );
-        expect(apiRes.statusCode, equals(200));
-        final apiJson = jsonDecode(apiRes.body) as Map<String, dynamic>;
-        expect(apiJson['userId'], equals('user-e2e'));
-        expect(apiJson['scope'], equals('read'));
-      },
-    );
+      // 1. Create authorization request without state (#5)
+      final authReq = oauthClient.createAuthorizationRequest(
+        redirectUri: Uri.parse(redirectUri),
+        codeChallenge: challenge,
+        scope: 'read',
+      );
+      expect(authReq.state, isNull);
+
+      // 2. Validate on Shelf /authorize endpoint and issue redirect (#12)
+      final shelfAuthReq = shelf.Request('GET', authReq.toUri());
+      final shelfAuthRes = await handleAuthorizeRequest(
+        shelfAuthReq,
+        validator: authorizeValidator,
+        issuer: 'https://auth.example.com',
+        onConsentRequired: (req, result) async {
+          const issuedCode = 'code-no-state-123';
+          await authCodeRepo.save(
+            AuthCode(
+              code: issuedCode,
+              clientId: result.client.clientId,
+              redirectUri: result.validatedRedirectUri,
+              userId: 'user-e2e',
+              codeChallenge: result.codeChallenge,
+              codeChallengeMethod: result.codeChallengeMethod,
+              expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+              scope: result.requestedScopes.join(' '),
+            ),
+          );
+          return redirectWithAuthorizationCode(
+            redirectUri: result.validatedRedirectUri,
+            code: issuedCode,
+            issuer: 'https://auth.example.com',
+            state: result.state,
+          );
+        },
+      );
+      expect(shelfAuthRes.statusCode, equals(303));
+      final callbackLocation = Uri.parse(shelfAuthRes.headers['location']!);
+      expect(callbackLocation.queryParameters.containsKey('state'), isFalse);
+
+      // 3. Parse and validate callback without expectedState (#5)
+      final callbackParams = oauthClient.requestParser.parseRedirect(
+        callbackLocation,
+      );
+      oauthClient.validateCallback(callbackParams);
+
+      // 4. Exchange code without redirectUri (#4)
+      final tokenResult = await oauthClient.exchangeCode(
+        code: callbackParams.code!,
+        codeVerifier: verifier,
+      );
+      expect(tokenResult, isA<TokenSuccess>());
+      final tokenSuccess = tokenResult as TokenSuccess;
+
+      // 5. Call Shelf protected resource using OAuthAuthenticatedClient (#9)
+      final resourceHttpClient = OAuthAuthenticatedClient(
+        MockClient((req) async {
+          final shelfReq = shelf.Request(
+            req.method,
+            req.url,
+            headers: req.headers,
+          );
+          final shelfRes = await protectedResourceHandler(shelfReq);
+          return http.Response(
+            await shelfRes.readAsString(),
+            shelfRes.statusCode,
+            headers: shelfRes.headers,
+          );
+        }),
+        tokenSuccess.accessToken,
+      );
+
+      final apiRes = await resourceHttpClient.get(
+        Uri.parse('https://api.example.com/profile'),
+      );
+      expect(apiRes.statusCode, equals(200));
+      final apiJson = jsonDecode(apiRes.body) as Map<String, dynamic>;
+      expect(apiJson['userId'], equals('user-e2e'));
+      expect(apiJson['scope'], equals('read'));
+    });
   });
 }
