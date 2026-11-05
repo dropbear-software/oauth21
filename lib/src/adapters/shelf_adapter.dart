@@ -1,8 +1,19 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:shelf/shelf.dart' as shelf;
+import '../domain/entities/access_token.dart';
 import '../domain/services/authorize_request_validator.dart';
+import '../domain/services/bearer_token_validator.dart';
 import '../domain/services/token_request_handler.dart';
+
+/// Request context key storing the authenticated [AccessToken] attached by
+/// [bearerAuthenticationMiddleware].
+const String oauthAccessTokenContextKey = 'oauth21.access_token';
+
+/// Retrieves the authenticated [AccessToken] attached to [request] by
+/// [bearerAuthenticationMiddleware], or `null` if none is present.
+AccessToken? getAccessTokenFromContext(shelf.Request request) =>
+    request.context[oauthAccessTokenContextKey] as AccessToken?;
 
 const Map<String, String> _tokenErrorHeaders = {
   'Content-Type': 'application/json;charset=UTF-8',
@@ -223,4 +234,51 @@ Future<shelf.Response> handleTokenRequest(
     body: jsonEncode(serverResponse.body),
     headers: serverResponse.headers,
   );
+}
+
+/// Shelf middleware that protects resource server endpoints using
+/// [BearerTokenValidator] in accordance with OAuth 2.1 Section 5.
+///
+/// - Validates only the HTTP `Authorization` header (never reading or
+///   consuming the request body stream or honoring URI query tokens).
+/// - On failure, returns the appropriate `400`, `401`, or `403` response with
+///   `WWW-Authenticate` and `Cache-Control: no-store` headers.
+/// - On success, attaches the validated [AccessToken] to `request.context`
+///   under [oauthAccessTokenContextKey] (retrievable via
+///   [getAccessTokenFromContext]) and forwards the request to the inner handler.
+shelf.Middleware bearerAuthenticationMiddleware({
+  required BearerTokenValidator validator,
+  Set<String> requiredScopes = const {},
+  bool isHttps = false,
+}) {
+  return (shelf.Handler innerHandler) {
+    return (shelf.Request request) async {
+      final result = await validator.validate(
+        authorizationHeader: request.headers['authorization'],
+        authorizationHeaders: request.headersAll['authorization'],
+        requiredScopes: requiredScopes,
+        isHttps: isHttps,
+      );
+
+      if (!result.isValid) {
+        final body = result.errorCode != null
+            ? jsonEncode({
+                'error': result.errorCode,
+                if (result.errorDescription != null)
+                  'error_description': result.errorDescription,
+              })
+            : null;
+        return shelf.Response(
+          result.statusCode,
+          body: body,
+          headers: result.headers,
+        );
+      }
+
+      final updatedRequest = request.change(
+        context: {oauthAccessTokenContextKey: result.accessToken!},
+      );
+      return innerHandler(updatedRequest);
+    };
+  };
 }

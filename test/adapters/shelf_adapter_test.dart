@@ -64,8 +64,12 @@ class FakeAuthCodeRepository implements AuthCodeRepository {
 }
 
 class FakeTokenRepository implements TokenRepository {
+  final Map<String, AccessToken> accessTokens = {};
+
   @override
-  Future<void> saveAccessToken(AccessToken token) async {}
+  Future<void> saveAccessToken(AccessToken token) async {
+    accessTokens[token.tokenHash] = token;
+  }
 
   @override
   Future<void> saveRefreshToken(RefreshToken token) async {}
@@ -75,6 +79,7 @@ class FakeTokenRepository implements TokenRepository {
     required AccessToken accessToken,
     RefreshToken? refreshToken,
   }) async {
+    accessTokens[accessToken.tokenHash] = accessToken;
     return true;
   }
 
@@ -93,7 +98,7 @@ class FakeTokenRepository implements TokenRepository {
 
   @override
   Future<AccessToken?> findAccessTokenByHash(String hashedValue) async {
-    return null;
+    return accessTokens[hashedValue];
   }
 
   @override
@@ -617,6 +622,128 @@ void main() {
         );
         expect(res.statusCode, isNot(equals(500)));
       });
+    });
+
+    group('bearerAuthenticationMiddleware (#9)', () {
+      late BearerTokenValidator bearerValidator;
+      const rawToken = 'valid-bearer-token-123';
+
+      setUp(() async {
+        bearerValidator = BearerTokenValidator(
+          tokenRepository: tokenRepo,
+          cryptoService: cryptoService,
+          realm: 'resource.example.com',
+        );
+        await tokenRepo.saveAccessToken(
+          AccessToken(
+            tokenHash: cryptoService.hashString(rawToken),
+            clientId: 'client-123',
+            userId: 'user-789',
+            scope: 'read write',
+            expiresAt: DateTime.now().add(const Duration(hours: 1)),
+          ),
+        );
+      });
+
+      test(
+        'should attach AccessToken to request context and preserve request body stream for downstream POST handlers',
+        () async {
+          final handler = const shelf.Pipeline()
+              .addMiddleware(
+                bearerAuthenticationMiddleware(
+                  validator: bearerValidator,
+                  requiredScopes: {'read'},
+                  isHttps: true,
+                ),
+              )
+              .addHandler((req) async {
+                final token = getAccessTokenFromContext(req);
+                final payload = await req.readAsString();
+                return shelf.Response.ok(
+                  jsonEncode({
+                    'user': token?.userId,
+                    'client': token?.clientId,
+                    'payload': payload,
+                  }),
+                );
+              });
+
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://resource.example.com/items'),
+            headers: {'Authorization': 'Bearer $rawToken'},
+            body: '{"name":"widget"}',
+          );
+
+          final res = await handler(req);
+          expect(res.statusCode, equals(200));
+          final body =
+              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+          expect(body['user'], equals('user-789'));
+          expect(body['client'], equals('client-123'));
+          expect(body['payload'], equals('{"name":"widget"}'));
+        },
+      );
+
+      test(
+        'should ignore ?access_token=... in URI query parameters and return 401 with bare WWW-Authenticate when Authorization header is absent',
+        () async {
+          final handler = const shelf.Pipeline()
+              .addMiddleware(
+                bearerAuthenticationMiddleware(
+                  validator: bearerValidator,
+                  isHttps: true,
+                ),
+              )
+              .addHandler((_) => shelf.Response.ok('secret'));
+
+          final req = shelf.Request(
+            'GET',
+            Uri.parse(
+              'https://resource.example.com/items?access_token=$rawToken',
+            ),
+          );
+
+          final res = await handler(req);
+          expect(res.statusCode, equals(401));
+          expect(
+            res.headers['www-authenticate'],
+            equals('Bearer realm="resource.example.com"'),
+          );
+          expect(await res.readAsString(), isEmpty);
+        },
+      );
+
+      test(
+        'should return 403 insufficient_scope with JSON error body when requiredScopes are not met',
+        () async {
+          final handler = const shelf.Pipeline()
+              .addMiddleware(
+                bearerAuthenticationMiddleware(
+                  validator: bearerValidator,
+                  requiredScopes: {'admin'},
+                  isHttps: true,
+                ),
+              )
+              .addHandler((_) => shelf.Response.ok('secret'));
+
+          final req = shelf.Request(
+            'GET',
+            Uri.parse('https://resource.example.com/admin'),
+            headers: {'Authorization': 'Bearer $rawToken'},
+          );
+
+          final res = await handler(req);
+          expect(res.statusCode, equals(403));
+          expect(
+            res.headers['www-authenticate'],
+            contains('error="insufficient_scope"'),
+          );
+          final body =
+              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+          expect(body['error'], equals('insufficient_scope'));
+        },
+      );
     });
   });
 }
