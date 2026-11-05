@@ -42,6 +42,63 @@ void main() {
       expect(uri.query, contains('scope=read+write'));
     });
 
+    test('should allow omitting optional state parameter (#5)', () {
+      final request = AuthRequest(
+        authorizationEndpoint: authEndpoint,
+        clientId: clientId,
+        redirectUri: redirectUri,
+        codeChallenge: codeChallenge,
+        scope: 'read',
+      );
+
+      expect(request.state, isNull);
+      final uri = request.toUri();
+      expect(uri.queryParameters.containsKey('state'), isFalse);
+      expect(uri.query, isNot(contains('state=')));
+    });
+
+    test(
+      'should reject empty string when state is explicitly provided (#5)',
+      () {
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: redirectUri,
+            state: '',
+            codeChallenge: codeChallenge,
+          ),
+          throwsArgumentError,
+        );
+      },
+    );
+
+    test(
+      'should reject redirectUri containing dot-segments or reserved query parameters (#10)',
+      () {
+        for (final badRedirect in [
+          'https://client.example.com/evil/..%2fcallback',
+          'https://client.example.com/.%2fcallback',
+          'https://client.example.com/callback?code=123',
+          'https://client.example.com/callback?state=abc',
+          'https://client.example.com/callback?iss=https://auth.example.com',
+          'https://client.example.com/callback?error=invalid_request',
+          'https://client.example.com/callback?foo=1&foo=2',
+        ]) {
+          expect(
+            () => AuthRequest(
+              authorizationEndpoint: authEndpoint,
+              clientId: clientId,
+              redirectUri: Uri.parse(badRedirect),
+              codeChallenge: codeChallenge,
+            ),
+            throwsArgumentError,
+            reason: 'Expected $badRedirect to be rejected',
+          );
+        }
+      },
+    );
+
     test('should reject redirect URI containing fragment', () {
       final invalidRedirect = Uri.parse(
         'https://client.example.com/callback#token=123',

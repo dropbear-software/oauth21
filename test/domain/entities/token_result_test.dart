@@ -76,14 +76,93 @@ void main() {
       });
 
       test(
-        'should parse expires_in passed as a string representation of integer',
+        'should reject expires_in passed as a string, zero, negative, or float',
         () {
-          const body =
-              '{"access_token":"token-123","token_type":"Bearer","expires_in":"7200"}';
-          final result =
-              TokenResult.fromResponse(body: body, headers: validHeaders)
-                  as TokenSuccess;
-          expect(result.expiresIn, equals(7200));
+          for (final badBody in [
+            '{"access_token":"token-123","token_type":"Bearer","expires_in":"7200"}',
+            '{"access_token":"token-123","token_type":"Bearer","expires_in":0}',
+            '{"access_token":"token-123","token_type":"Bearer","expires_in":-10}',
+            '{"access_token":"token-123","token_type":"Bearer","expires_in":3600.5}',
+          ]) {
+            expect(
+              () => TokenResult.fromResponse(
+                body: badBody,
+                headers: validHeaders,
+              ),
+              throwsFormatException,
+              reason: 'Expected $badBody to throw FormatException',
+            );
+          }
+        },
+      );
+
+      test(
+        'should reject non-VSCHAR access_token, non-string/non-VSCHAR refresh_token, or non-string/invalid-ABNF scope',
+        () {
+          for (final badBody in [
+            r'{"access_token":"token\n123","token_type":"Bearer"}',
+            '{"access_token":"token-123","token_type":"Bearer","refresh_token":123}',
+            '{"access_token":"token-123","token_type":"Bearer","refresh_token":""}',
+            r'{"access_token":"token-123","token_type":"Bearer","refresh_token":"ref\n123"}',
+            '{"access_token":"token-123","token_type":"Bearer","scope":["read"]}',
+            '{"access_token":"token-123","token_type":"Bearer","scope":"read  write"}',
+            r'{"access_token":"token-123","token_type":"Bearer","scope":"read\"quote"}',
+          ]) {
+            expect(
+              () => TokenResult.fromResponse(
+                body: badBody,
+                headers: validHeaders,
+              ),
+              throwsFormatException,
+              reason: 'Expected $badBody to throw FormatException',
+            );
+          }
+        },
+      );
+
+      test(
+        'should validate statusCode when provided (200 for success, >=400 for error)',
+        () {
+          expect(
+            TokenResult.fromResponse(
+              body: successBody,
+              headers: validHeaders,
+              statusCode: 200,
+            ),
+            isA<TokenSuccess>(),
+          );
+          expect(
+            () => TokenResult.fromResponse(
+              body: successBody,
+              headers: validHeaders,
+              statusCode: 201,
+            ),
+            throwsFormatException,
+          );
+          expect(
+            () => TokenResult.fromResponse(
+              body: successBody,
+              headers: validHeaders,
+              statusCode: 400,
+            ),
+            throwsFormatException,
+          );
+          expect(
+            TokenResult.fromResponse(
+              body: errorBody,
+              headers: validHeaders,
+              statusCode: 400,
+            ),
+            isA<TokenError>(),
+          );
+          expect(
+            () => TokenResult.fromResponse(
+              body: errorBody,
+              headers: validHeaders,
+              statusCode: 200,
+            ),
+            throwsFormatException,
+          );
         },
       );
 

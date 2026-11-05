@@ -301,8 +301,133 @@ void main() {
           isHttps: true,
         );
         expect(res.statusCode, equals(401));
+        expect(res.headers['WWW-Authenticate'], equals('Basic'));
         expect(res.body['error'], equals('invalid_client'));
       });
+
+      test(
+        'should support case-insensitive Basic scheme and + form-urlencoded spaces in Basic Auth',
+        () async {
+          final clientWithSpace = ClientRegistration(
+            clientId: 'client with space',
+            clientType: ClientType.confidential,
+            clientSecretHash: cryptoService.hashString('secret with space'),
+            redirectUris: {Uri.parse('https://example.com/cb')},
+            allowedScopes: {'read'},
+            allowedGrantTypes: {'client_credentials'},
+          );
+          clientRepo.clients[clientWithSpace.clientId] = clientWithSpace;
+
+          final encodedId = Uri.encodeQueryComponent('client with space');
+          final encodedSecret = Uri.encodeQueryComponent('secret with space');
+          expect(encodedId, contains('+'));
+          final authHeader =
+              'basic ${base64.encode(utf8.encode('$encodedId:$encodedSecret'))}';
+
+          final res = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: authHeader,
+            isHttps: true,
+          );
+          expect(res.statusCode, equals(200));
+        },
+      );
+
+      test(
+        'should return 401 with WWW-Authenticate on malformed percent-encoding, colons, empty client_id, or non-Basic scheme in Authorization header',
+        () async {
+          final badPercent =
+              'Basic ${base64.encode(utf8.encode('client%ZZ:secret'))}';
+          final resPercent = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: badPercent,
+            isHttps: true,
+          );
+          expect(resPercent.statusCode, equals(401));
+          expect(resPercent.headers['WWW-Authenticate'], equals('Basic'));
+
+          final extraColon =
+              'Basic ${base64.encode(utf8.encode('client:secret:extra'))}';
+          final resColon = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: extraColon,
+            isHttps: true,
+          );
+          expect(resColon.statusCode, equals(401));
+          expect(resColon.headers['WWW-Authenticate'], equals('Basic'));
+
+          final emptyClientId =
+              'Basic ${base64.encode(utf8.encode(':secret123'))}';
+          final resEmptyId = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: emptyClientId,
+            isHttps: true,
+          );
+          expect(resEmptyId.statusCode, equals(401));
+          expect(resEmptyId.headers['WWW-Authenticate'], equals('Basic'));
+
+          final resBearer = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: 'Bearer some-token',
+            isHttps: true,
+          );
+          expect(resBearer.statusCode, equals(401));
+          expect(resBearer.headers['WWW-Authenticate'], equals('Basic'));
+        },
+      );
+
+      test(
+        'should reject conflicting client_id in body when Basic Auth is used',
+        () async {
+          final authHeader =
+              'Basic ${base64.encode(utf8.encode('client-confidential:secret123'))}';
+          final res = await handler.handle(
+            {
+              'grant_type': 'client_credentials',
+              'client_id': 'different-client',
+            },
+            authorizationHeader: authHeader,
+            isHttps: true,
+          );
+          expect(res.statusCode, equals(400));
+          expect(res.body['error'], equals('invalid_request'));
+        },
+      );
+
+      test(
+        'should normalize empty parameter values without mutating unmodifiable input map',
+        () async {
+          final unmodifiableBody = Map<String, String>.unmodifiable({
+            'grant_type': 'client_credentials',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'scope': '',
+          });
+          final res = await handler.handle(unmodifiableBody, isHttps: true);
+          expect(res.statusCode, equals(200));
+        },
+      );
+
+      test(
+        'should reject non-VSCHAR characters in client_id or client_secret',
+        () async {
+          final resBadId = await handler.handle({
+            'grant_type': 'client_credentials',
+            'client_id': 'client\nwith\nnewline',
+            'client_secret': 'secret123',
+          }, isHttps: true);
+          expect(resBadId.statusCode, equals(400));
+          expect(resBadId.body['error'], equals('invalid_request'));
+
+          final resBadSecret = await handler.handle({
+            'grant_type': 'client_credentials',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret\x7f',
+          }, isHttps: true);
+          expect(resBadSecret.statusCode, equals(400));
+          expect(resBadSecret.body['error'], equals('invalid_request'));
+        },
+      );
 
       test('should authenticate via request body credentials', () async {
         final res = await handler.handle({
@@ -344,6 +469,7 @@ void main() {
           'client_secret': 'secret',
         }, isHttps: true);
         expect(res.statusCode, equals(401));
+        expect(res.headers['WWW-Authenticate'], equals('Basic'));
         expect(res.body['error'], equals('invalid_client'));
       });
 
@@ -353,6 +479,7 @@ void main() {
           'client_id': 'client-confidential',
         }, isHttps: true);
         expect(res.statusCode, equals(401));
+        expect(res.headers['WWW-Authenticate'], equals('Basic'));
         expect(res.body['error'], equals('invalid_client'));
       });
 
@@ -363,6 +490,7 @@ void main() {
           'client_secret': 'wrong-secret',
         }, isHttps: true);
         expect(res.statusCode, equals(401));
+        expect(res.headers['WWW-Authenticate'], equals('Basic'));
         expect(res.body['error'], equals('invalid_client'));
       });
 
@@ -503,11 +631,66 @@ void main() {
           'client_id': 'client-confidential',
           'client_secret': 'secret123',
           'code': 'valid-auth-code',
-          'code_verifier': 'wrong-verifier',
+          'code_verifier':
+              'wrong-verifier-string-1234567890-wrong-verifier-123',
           'redirect_uri': 'https://example.com/cb',
         }, isHttps: true);
         expect(res.statusCode, equals(400));
         expect(res.body['error'], equals('invalid_grant'));
+      });
+
+      test(
+        'should reject code_verifier violating ABNF (too short, too long, or invalid chars) with invalid_request without revoking code',
+        () async {
+          final resShort = await handler.handle({
+            'grant_type': 'authorization_code',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'code': 'valid-auth-code',
+            'code_verifier': 'too-short-verifier',
+            'redirect_uri': 'https://example.com/cb',
+          }, isHttps: true);
+          expect(resShort.statusCode, equals(400));
+          expect(resShort.body['error'], equals('invalid_request'));
+
+          final resLong = await handler.handle({
+            'grant_type': 'authorization_code',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'code': 'valid-auth-code',
+            'code_verifier': 'a' * 129,
+            'redirect_uri': 'https://example.com/cb',
+          }, isHttps: true);
+          expect(resLong.statusCode, equals(400));
+          expect(resLong.body['error'], equals('invalid_request'));
+
+          final resBadChar = await handler.handle({
+            'grant_type': 'authorization_code',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'code': 'valid-auth-code',
+            'code_verifier': '${'a' * 42}\$',
+            'redirect_uri': 'https://example.com/cb',
+          }, isHttps: true);
+          expect(resBadChar.statusCode, equals(400));
+          expect(resBadChar.body['error'], equals('invalid_request'));
+
+          // Code must still be unused and redeemable
+          final storedCode = await authCodeRepo.findByCode('valid-auth-code');
+          expect(storedCode?.isUsed, isFalse);
+        },
+      );
+
+      test('should reject non-VSCHAR code with invalid_request', () async {
+        final res = await handler.handle({
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'code\nwith\nnewline',
+          'code_verifier': verifier,
+        }, isHttps: true);
+        expect(res.statusCode, equals(400));
+        expect(res.body['error'], equals('invalid_request'));
       });
 
       test('should reject expired authorization code', () async {
@@ -534,19 +717,21 @@ void main() {
         expect(res.body['error'], equals('invalid_grant'));
       });
 
-      test('should reject token request if redirect_uri is omitted but was '
-          'bound to the authorization code', () async {
-        final res = await handler.handle({
-          'grant_type': 'authorization_code',
-          'client_id': 'client-confidential',
-          'client_secret': 'secret123',
-          'code': 'valid-auth-code',
-          'code_verifier': verifier,
-        }, isHttps: true);
+      test(
+        'should allow token request when redirect_uri is omitted per OAuth 2.1 Section 4.1.3',
+        () async {
+          final res = await handler.handle({
+            'grant_type': 'authorization_code',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'code': 'valid-auth-code',
+            'code_verifier': verifier,
+          }, isHttps: true);
 
-        expect(res.statusCode, equals(400));
-        expect(res.body['error'], equals('invalid_grant'));
-      });
+          expect(res.statusCode, equals(200));
+          expect(res.body['access_token'], isNotNull);
+        },
+      );
 
       test('should detect code reuse and trigger family revocation', () async {
         // Use code first time
@@ -601,7 +786,8 @@ void main() {
             'client_id': 'client-confidential',
             'client_secret': 'secret123',
             'code': 'valid-auth-code',
-            'code_verifier': 'attacker-wrong-verifier',
+            'code_verifier':
+                'attacker-wrong-verifier-string-1234567890-attacker',
             'redirect_uri': 'https://example.com/cb',
           }, isHttps: true);
 
@@ -778,6 +964,36 @@ void main() {
           expect(res.body['error'], equals('invalid_scope'));
         },
       );
+
+      test(
+        'should deduplicate scope tokens and reject malformed scope ABNF in client_credentials',
+        () async {
+          final resDedup = await handler.handle({
+            'grant_type': 'client_credentials',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'scope': 'read write read',
+          }, isHttps: true);
+          expect(resDedup.statusCode, equals(200));
+          expect(resDedup.body['scope'], equals('read write'));
+
+          for (final badScope in [
+            'read  write',
+            ' read',
+            'read"quote',
+            r'read\slash',
+          ]) {
+            final resBad = await handler.handle({
+              'grant_type': 'client_credentials',
+              'client_id': 'client-confidential',
+              'client_secret': 'secret123',
+              'scope': badScope,
+            }, isHttps: true);
+            expect(resBad.statusCode, equals(400));
+            expect(resBad.body['error'], equals('invalid_scope'));
+          }
+        },
+      );
     });
 
     group('Refresh Token Grant', () {
@@ -798,23 +1014,65 @@ void main() {
         await tokenRepo.saveRefreshToken(activeToken);
       });
 
-      test('should rotate refresh token and return new tokens', () async {
-        final res = await handler.handle({
-          'grant_type': 'refresh_token',
-          'client_id': 'client-confidential',
-          'client_secret': 'secret123',
-          'refresh_token': rawTokenVal,
-        }, isHttps: true);
+      test(
+        'should rotate refresh token and return new tokens while preserving original expiresAt',
+        () async {
+          final res = await handler.handle({
+            'grant_type': 'refresh_token',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'refresh_token': rawTokenVal,
+          }, isHttps: true);
 
-        expect(res.statusCode, equals(200));
-        expect(res.body['access_token'], isNotNull);
-        expect(res.body['refresh_token'], isNotNull);
-        expect(res.body['refresh_token'], isNot(equals(rawTokenVal)));
+          expect(res.statusCode, equals(200));
+          expect(res.body['access_token'], isNotNull);
+          expect(res.body['refresh_token'], isNotNull);
+          expect(res.body['refresh_token'], isNot(equals(rawTokenVal)));
 
-        final oldHash = cryptoService.hashString(rawTokenVal);
-        final oldToken = await tokenRepo.findRefreshTokenByHash(oldHash);
-        expect(oldToken?.isRevoked, isTrue);
-      });
+          final oldHash = cryptoService.hashString(rawTokenVal);
+          final oldToken = await tokenRepo.findRefreshTokenByHash(oldHash);
+          expect(oldToken?.isRevoked, isTrue);
+
+          final newRefreshVal = res.body['refresh_token'] as String;
+          final newHash = cryptoService.hashString(newRefreshVal);
+          final newToken = await tokenRepo.findRefreshTokenByHash(newHash);
+          expect(newToken?.expiresAt, equals(activeToken.expiresAt));
+        },
+      );
+
+      test(
+        'should deduplicate narrowed scope and reject malformed scope ABNF or non-VSCHAR refresh_token',
+        () async {
+          final resDedup = await handler.handle({
+            'grant_type': 'refresh_token',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'refresh_token': rawTokenVal,
+            'scope': 'read read',
+          }, isHttps: true);
+          expect(resDedup.statusCode, equals(200));
+          expect(resDedup.body['scope'], equals('read'));
+
+          final resBadScope = await handler.handle({
+            'grant_type': 'refresh_token',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'refresh_token': rawTokenVal,
+            'scope': 'read  write',
+          }, isHttps: true);
+          expect(resBadScope.statusCode, equals(400));
+          expect(resBadScope.body['error'], equals('invalid_scope'));
+
+          final resBadTokenChar = await handler.handle({
+            'grant_type': 'refresh_token',
+            'client_id': 'client-confidential',
+            'client_secret': 'secret123',
+            'refresh_token': 'refresh\ntoken',
+          }, isHttps: true);
+          expect(resBadTokenChar.statusCode, equals(400));
+          expect(resBadTokenChar.body['error'], equals('invalid_request'));
+        },
+      );
 
       test('should reject request missing refresh_token', () async {
         final res = await handler.handle({

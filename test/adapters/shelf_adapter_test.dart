@@ -64,8 +64,12 @@ class FakeAuthCodeRepository implements AuthCodeRepository {
 }
 
 class FakeTokenRepository implements TokenRepository {
+  final Map<String, AccessToken> accessTokens = {};
+
   @override
-  Future<void> saveAccessToken(AccessToken token) async {}
+  Future<void> saveAccessToken(AccessToken token) async {
+    accessTokens[token.tokenHash] = token;
+  }
 
   @override
   Future<void> saveRefreshToken(RefreshToken token) async {}
@@ -75,6 +79,7 @@ class FakeTokenRepository implements TokenRepository {
     required AccessToken accessToken,
     RefreshToken? refreshToken,
   }) async {
+    accessTokens[accessToken.tokenHash] = accessToken;
     return true;
   }
 
@@ -93,7 +98,7 @@ class FakeTokenRepository implements TokenRepository {
 
   @override
   Future<AccessToken?> findAccessTokenByHash(String hashedValue) async {
-    return null;
+    return accessTokens[hashedValue];
   }
 
   @override
@@ -172,6 +177,7 @@ void main() {
         final res = await handleAuthorizeRequest(
           req,
           validator: authValidator,
+          issuer: 'https://auth.example.com',
           onConsentRequired: (request, result) {
             consentCalled = true;
             expect(result.isValid, isTrue);
@@ -184,6 +190,29 @@ void main() {
         expect(res.statusCode, equals(200));
         expect(await res.readAsString(), equals('consent needed'));
       });
+
+      test(
+        'should return 405 Method Not Allowed on non-GET request (#12)',
+        () async {
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/authorize'),
+          );
+
+          final res = await handleAuthorizeRequest(
+            req,
+            validator: authValidator,
+            issuer: 'https://auth.example.com',
+            onConsentRequired: (request, result) {
+              fail('Should not be called');
+            },
+          );
+
+          expect(res.statusCode, equals(405));
+          expect(res.headers['allow'], equals('GET'));
+          expect(res.headers['cache-control'], equals('no-store'));
+        },
+      );
 
       test('should return 400 JSON on non-redirectable error', () async {
         final req = shelf.Request(
@@ -198,6 +227,7 @@ void main() {
         final res = await handleAuthorizeRequest(
           req,
           validator: authValidator,
+          issuer: 'https://auth.example.com',
           onConsentRequired: (request, result) {
             fail('Should not be called');
           },
@@ -210,41 +240,52 @@ void main() {
         expect(body['error'], equals('invalid_client'));
       });
 
-      test('should return 303 redirect on redirectable error', () async {
-        final req = shelf.Request(
-          'GET',
-          Uri.parse(
-            'https://auth.example.com/authorize?'
-            'response_type=code&'
-            'client_id=client-123&'
-            'redirect_uri=https%3A%2F%2Fexample.com%2Fcb&'
-            // missing code_challenge (redirectable error)
-            'state=state123',
-          ),
-        );
+      test(
+        'should return 303 redirect with mandatory iss on redirectable error (#12)',
+        () async {
+          final req = shelf.Request(
+            'GET',
+            Uri.parse(
+              'https://auth.example.com/authorize?'
+              'response_type=code&'
+              'client_id=client-123&'
+              'redirect_uri=https%3A%2F%2Fexample.com%2Fcb&'
+              // missing code_challenge (redirectable error)
+              'state=state123',
+            ),
+          );
 
-        final res = await handleAuthorizeRequest(
-          req,
-          validator: authValidator,
-          onConsentRequired: (request, result) {
-            fail('Should not be called');
-          },
-        );
+          final res = await handleAuthorizeRequest(
+            req,
+            validator: authValidator,
+            issuer: 'https://auth.example.com',
+            onConsentRequired: (request, result) {
+              fail('Should not be called');
+            },
+          );
 
-        expect(res.statusCode, equals(303));
-        final location = res.headers['location'];
-        expect(location, isNotNull);
-        final redirectUri = Uri.parse(location!);
-        expect(redirectUri.queryParameters['error'], equals('invalid_request'));
-        expect(
-          redirectUri.queryParameters['error_description'],
-          contains('code_challenge'),
-        );
-        expect(redirectUri.queryParameters['state'], equals('state123'));
-      });
+          expect(res.statusCode, equals(303));
+          final location = res.headers['location'];
+          expect(location, isNotNull);
+          final redirectUri = Uri.parse(location!);
+          expect(
+            redirectUri.queryParameters['error'],
+            equals('invalid_request'),
+          );
+          expect(
+            redirectUri.queryParameters['error_description'],
+            contains('code_challenge'),
+          );
+          expect(redirectUri.queryParameters['state'], equals('state123'));
+          expect(
+            redirectUri.queryParameters['iss'],
+            equals('https://auth.example.com'),
+          );
+        },
+      );
     });
 
-    group('redirectWithAuthorizationCode', () {
+    group('redirectWithAuthorizationCode & redirectWithAuthorizationError', () {
       test('should build 303 redirect with code, state, and iss', () {
         final res = redirectWithAuthorizationCode(
           redirectUri: Uri.parse('https://example.com/cb?existing=1'),
@@ -269,6 +310,50 @@ void main() {
           equals('https://auth.example.com'),
         );
       });
+
+      test(
+        'should omit state when state is null in redirectWithAuthorizationCode (#5)',
+        () {
+          final res = redirectWithAuthorizationCode(
+            redirectUri: Uri.parse('https://example.com/cb'),
+            code: 'auth-code-123',
+            issuer: 'https://auth.example.com',
+          );
+
+          final parsed = Uri.parse(res.headers['location']!);
+          expect(parsed.queryParameters['code'], equals('auth-code-123'));
+          expect(parsed.queryParameters.containsKey('state'), isFalse);
+          expect(
+            parsed.queryParameters['iss'],
+            equals('https://auth.example.com'),
+          );
+        },
+      );
+
+      test(
+        'should build 303 error redirect with mandatory iss in redirectWithAuthorizationError (#12)',
+        () {
+          final res = redirectWithAuthorizationError(
+            redirectUri: Uri.parse('https://example.com/cb'),
+            error: 'access_denied',
+            errorDescription: 'User denied access.',
+            issuer: 'https://auth.example.com',
+          );
+
+          expect(res.statusCode, equals(303));
+          final parsed = Uri.parse(res.headers['location']!);
+          expect(parsed.queryParameters['error'], equals('access_denied'));
+          expect(
+            parsed.queryParameters['error_description'],
+            equals('User denied access.'),
+          );
+          expect(parsed.queryParameters.containsKey('state'), isFalse);
+          expect(
+            parsed.queryParameters['iss'],
+            equals('https://auth.example.com'),
+          );
+        },
+      );
     });
 
     group('handleTokenRequest', () {
@@ -537,6 +622,128 @@ void main() {
         );
         expect(res.statusCode, isNot(equals(500)));
       });
+    });
+
+    group('bearerAuthenticationMiddleware (#9)', () {
+      late BearerTokenValidator bearerValidator;
+      const rawToken = 'valid-bearer-token-123';
+
+      setUp(() async {
+        bearerValidator = BearerTokenValidator(
+          tokenRepository: tokenRepo,
+          cryptoService: cryptoService,
+          realm: 'resource.example.com',
+        );
+        await tokenRepo.saveAccessToken(
+          AccessToken(
+            tokenHash: cryptoService.hashString(rawToken),
+            clientId: 'client-123',
+            userId: 'user-789',
+            scope: 'read write',
+            expiresAt: DateTime.now().add(const Duration(hours: 1)),
+          ),
+        );
+      });
+
+      test(
+        'should attach AccessToken to request context and preserve request body stream for downstream POST handlers',
+        () async {
+          final handler = const shelf.Pipeline()
+              .addMiddleware(
+                bearerAuthenticationMiddleware(
+                  validator: bearerValidator,
+                  requiredScopes: {'read'},
+                  isHttps: true,
+                ),
+              )
+              .addHandler((req) async {
+                final token = getAccessTokenFromContext(req);
+                final payload = await req.readAsString();
+                return shelf.Response.ok(
+                  jsonEncode({
+                    'user': token?.userId,
+                    'client': token?.clientId,
+                    'payload': payload,
+                  }),
+                );
+              });
+
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://resource.example.com/items'),
+            headers: {'Authorization': 'Bearer $rawToken'},
+            body: '{"name":"widget"}',
+          );
+
+          final res = await handler(req);
+          expect(res.statusCode, equals(200));
+          final body =
+              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+          expect(body['user'], equals('user-789'));
+          expect(body['client'], equals('client-123'));
+          expect(body['payload'], equals('{"name":"widget"}'));
+        },
+      );
+
+      test(
+        'should ignore ?access_token=... in URI query parameters and return 401 with bare WWW-Authenticate when Authorization header is absent',
+        () async {
+          final handler = const shelf.Pipeline()
+              .addMiddleware(
+                bearerAuthenticationMiddleware(
+                  validator: bearerValidator,
+                  isHttps: true,
+                ),
+              )
+              .addHandler((_) => shelf.Response.ok('secret'));
+
+          final req = shelf.Request(
+            'GET',
+            Uri.parse(
+              'https://resource.example.com/items?access_token=$rawToken',
+            ),
+          );
+
+          final res = await handler(req);
+          expect(res.statusCode, equals(401));
+          expect(
+            res.headers['www-authenticate'],
+            equals('Bearer realm="resource.example.com"'),
+          );
+          expect(await res.readAsString(), isEmpty);
+        },
+      );
+
+      test(
+        'should return 403 insufficient_scope with JSON error body when requiredScopes are not met',
+        () async {
+          final handler = const shelf.Pipeline()
+              .addMiddleware(
+                bearerAuthenticationMiddleware(
+                  validator: bearerValidator,
+                  requiredScopes: {'admin'},
+                  isHttps: true,
+                ),
+              )
+              .addHandler((_) => shelf.Response.ok('secret'));
+
+          final req = shelf.Request(
+            'GET',
+            Uri.parse('https://resource.example.com/admin'),
+            headers: {'Authorization': 'Bearer $rawToken'},
+          );
+
+          final res = await handler(req);
+          expect(res.statusCode, equals(403));
+          expect(
+            res.headers['www-authenticate'],
+            contains('error="insufficient_scope"'),
+          );
+          final body =
+              jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+          expect(body['error'], equals('insufficient_scope'));
+        },
+      );
     });
   });
 }

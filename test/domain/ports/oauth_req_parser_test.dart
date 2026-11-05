@@ -146,6 +146,48 @@ void main() {
           );
         },
       );
+
+      test(
+        'should throw ArgumentError if redirect contains both code and error parameters (#13)',
+        () {
+          final ambiguousUri = Uri.parse(
+            'https://client.example.com/callback?code=splat-code&error=access_denied',
+          );
+          expect(() => parser.parseRedirect(ambiguousUri), throwsArgumentError);
+        },
+      );
+
+      test(
+        'should reject redirect URI if iss contains non-VSCHAR characters (#13)',
+        () {
+          final malformedIssUri = Uri.parse(
+            'https://client.example.com/callback?code=splat-code&iss=https://auth.example.com\nbreak',
+          );
+          expect(
+            () => parser.parseRedirect(malformedIssUri),
+            throwsFormatException,
+          );
+        },
+      );
+
+      test('should parse valid error_uri and reject malformed error_uri (#13)', () {
+        final validErrorUri = Uri.parse(
+          'https://client.example.com/callback?error=invalid_request&error_uri=https%3A%2F%2Fauth.example.com%2Fdocs%2Ferrors',
+        );
+        final parsed = parser.parseRedirect(validErrorUri);
+        expect(parsed.errorUri, equals('https://auth.example.com/docs/errors'));
+
+        for (final badErrorUri in [
+          'https://client.example.com/callback?error=invalid_request&error_uri=not-a-uri-with-scheme',
+          'https://client.example.com/callback?error=invalid_request&error_uri=https://auth.example.com/"bad"',
+        ]) {
+          expect(
+            () => parser.parseRedirect(Uri.parse(badErrorUri)),
+            throwsFormatException,
+            reason: 'Expected $badErrorUri to throw FormatException',
+          );
+        }
+      });
     });
   });
 }

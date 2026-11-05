@@ -8,6 +8,15 @@ final RegExp _reverseDomainSchemePattern = RegExp(
   r'^[a-z0-9]+(\.[a-z0-9-]+)+$',
 );
 
+const Set<String> _reservedAuthorizationResponseKeys = {
+  'code',
+  'state',
+  'iss',
+  'error',
+  'error_description',
+  'error_uri',
+};
+
 /// Returns `true` if [host] is an exact loopback address (`localhost`,
 /// `127.0.0.1`, `::1`, or `[::1]`).
 bool isLoopbackHost(String host) {
@@ -54,6 +63,27 @@ bool isAllowedHttpEndpointUri(Uri uri, {bool allowLoopbackHttp = true}) {
 bool isAllowedRedirectUri(Uri uri) {
   if (!uri.hasScheme || uri.hasFragment || uri.userInfo.isNotEmpty) {
     return false;
+  }
+  if (uri.pathSegments.any(
+    (segment) =>
+        segment == '.' ||
+        segment == '..' ||
+        segment.split('/').any((part) => part == '.' || part == '..'),
+  )) {
+    return false;
+  }
+  if (uri.hasQuery) {
+    try {
+      final queryParamsAll = uri.queryParametersAll;
+      for (final entry in queryParamsAll.entries) {
+        if (entry.value.length > 1 ||
+            _reservedAuthorizationResponseKeys.contains(entry.key)) {
+          return false;
+        }
+      }
+    } on Object catch (_) {
+      return false;
+    }
   }
   final scheme = uri.scheme.toLowerCase();
   if (scheme == 'https') {

@@ -1,7 +1,114 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:oauth21/oauth21.dart';
+import 'package:shelf/shelf.dart' as shelf;
 import 'package:test/test.dart';
+
+class _IntegrationCrypto implements CryptoService {
+  int _counter = 0;
+
+  @override
+  String generateRandomEntropyString([int bits = 256]) =>
+      'issued-token-${++_counter}';
+
+  @override
+  String hashString(String input) =>
+      sha256.convert(utf8.encode(input)).toString();
+
+  @override
+  String hashAndBase64UrlEncode(String input) => base64Url
+      .encode(sha256.convert(utf8.encode(input)).bytes)
+      .replaceAll('=', '');
+
+  @override
+  bool verifyPasswordHash(String plain, String hashed) =>
+      CryptoService.safeEquals(hashString(plain), hashed);
+}
+
+class _IntegrationClientRepo implements ClientRepository {
+  final Map<String, ClientRegistration> clients = {};
+
+  @override
+  Future<ClientRegistration?> findById(String clientId) async =>
+      clients[clientId];
+}
+
+class _IntegrationAuthCodeRepo implements AuthCodeRepository {
+  final Map<String, AuthCode> codes = {};
+
+  @override
+  Future<AuthCode?> findByCode(String code) async => codes[code];
+
+  @override
+  Future<void> save(AuthCode authCode) async {
+    codes[authCode.code] = authCode;
+  }
+
+  @override
+  Future<bool> tryConsume(String code) async {
+    final existing = codes[code];
+    if (existing == null || existing.isUsed || existing.isExpired) return false;
+    codes[code] = existing.copyWith(isUsed: true);
+    return true;
+  }
+}
+
+class _IntegrationTokenRepo implements TokenRepository {
+  final Map<String, AccessToken> accessTokens = {};
+  final Map<String, RefreshToken> refreshTokens = {};
+
+  @override
+  Future<AccessToken?> findAccessTokenByHash(String hashedValue) async =>
+      accessTokens[hashedValue];
+
+  @override
+  Future<RefreshToken?> findRefreshTokenByHash(String hashedValue) async =>
+      refreshTokens[hashedValue];
+
+  @override
+  Future<void> revokeAllTokensForClientAndUser(
+    String clientId,
+    String? userId,
+  ) async {}
+
+  @override
+  Future<void> revokeByAuthorizationCode(String authorizationCode) async {}
+
+  @override
+  Future<void> revokeRefreshTokenByHash(String hashedValue) async {}
+
+  @override
+  Future<bool> rotateRefreshToken({
+    required String oldTokenHash,
+    required AccessToken newAccessToken,
+    required RefreshToken newRefreshToken,
+    Duration graceWindow = const Duration(seconds: 30),
+  }) async => true;
+
+  @override
+  Future<bool> saveIssuedTokens({
+    required AccessToken accessToken,
+    RefreshToken? refreshToken,
+  }) async {
+    await saveAccessToken(accessToken);
+    if (refreshToken != null) {
+      await saveRefreshToken(refreshToken);
+    }
+    return true;
+  }
+
+  @override
+  Future<void> saveAccessToken(AccessToken token) async {
+    accessTokens[token.tokenHash] = token;
+  }
+
+  @override
+  Future<void> saveRefreshToken(RefreshToken token) async {
+    refreshTokens[token.tokenHash] = token;
+  }
+}
 
 void main() {
   group('OAuth 2.1 Complete Flow Integration Test', () {
@@ -181,5 +288,163 @@ void main() {
       expect(success.accessToken, equals('new-access-token'));
       expect(success.refreshToken, equals('new-refresh-token'));
     });
+
+    test(
+      'executes end-to-end flow without state on /authorize, without redirect_uri on /token, and accesses Shelf resource protected by bearerAuthenticationMiddleware (#4, #5, #9, #12)',
+      () async {
+        final crypto = _IntegrationCrypto();
+        final clientRepo = _IntegrationClientRepo();
+        final authCodeRepo = _IntegrationAuthCodeRepo();
+        final tokenRepo = _IntegrationTokenRepo();
+
+        clientRepo.clients[clientId] = ClientRegistration(
+          clientId: clientId,
+          clientType: ClientType.confidential,
+          clientSecretHash: crypto.hashString(clientSecret),
+          redirectUris: {Uri.parse(redirectUri)},
+          allowedScopes: {'read', 'write'},
+          allowedGrantTypes: {'authorization_code', 'refresh_token'},
+        );
+
+        final authorizeValidator = AuthorizeRequestValidator(clientRepo);
+        final tokenHandler = TokenRequestHandler(
+          clientRepository: clientRepo,
+          authCodeRepository: authCodeRepo,
+          tokenRepository: tokenRepo,
+          cryptoService: crypto,
+        );
+        final bearerValidator = BearerTokenValidator(
+          tokenRepository: tokenRepo,
+          cryptoService: crypto,
+        );
+
+        final protectedResourceHandler = const shelf.Pipeline()
+            .addMiddleware(
+              bearerAuthenticationMiddleware(
+                validator: bearerValidator,
+                requiredScopes: {'read'},
+                isHttps: true,
+              ),
+            )
+            .addHandler((req) {
+              final token = getAccessTokenFromContext(req);
+              return shelf.Response.ok(
+                jsonEncode({'userId': token?.userId, 'scope': token?.scope}),
+                headers: {'Content-Type': 'application/json'},
+              );
+            });
+
+        final verifier = CodeVerifier.generate();
+        final challenge = CodeChallenge.s256(verifier);
+
+        final oauthClient = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: clientId,
+          clientSecret: clientSecret,
+          expectedIssuer: 'https://auth.example.com',
+          httpClient: HttpAdapter(
+            MockClient((req) async {
+              final shelfReq = shelf.Request(
+                req.method,
+                req.url,
+                headers: req.headers,
+                body: req.body,
+              );
+              final shelfRes = await handleTokenRequest(
+                shelfReq,
+                handler: tokenHandler,
+                isHttps: true,
+              );
+              return http.Response(
+                await shelfRes.readAsString(),
+                shelfRes.statusCode,
+                headers: shelfRes.headers,
+              );
+            }),
+          ),
+        );
+
+        // 1. Create authorization request without state (#5)
+        final authReq = oauthClient.createAuthorizationRequest(
+          redirectUri: Uri.parse(redirectUri),
+          codeChallenge: challenge,
+          scope: 'read',
+        );
+        expect(authReq.state, isNull);
+
+        // 2. Validate on Shelf /authorize endpoint and issue redirect (#12)
+        final shelfAuthReq = shelf.Request('GET', authReq.toUri());
+        final shelfAuthRes = await handleAuthorizeRequest(
+          shelfAuthReq,
+          validator: authorizeValidator,
+          issuer: 'https://auth.example.com',
+          onConsentRequired: (req, result) async {
+            const issuedCode = 'code-no-state-123';
+            await authCodeRepo.save(
+              AuthCode(
+                code: issuedCode,
+                clientId: result.client!.clientId,
+                redirectUri: result.validatedRedirectUri!,
+                userId: 'user-e2e',
+                codeChallenge: result.codeChallenge!,
+                codeChallengeMethod: result.codeChallengeMethod!,
+                expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+                scope: result.requestedScopes.join(' '),
+              ),
+            );
+            return redirectWithAuthorizationCode(
+              redirectUri: result.validatedRedirectUri!,
+              code: issuedCode,
+              issuer: 'https://auth.example.com',
+              state: result.state,
+            );
+          },
+        );
+        expect(shelfAuthRes.statusCode, equals(303));
+        final callbackLocation = Uri.parse(shelfAuthRes.headers['location']!);
+        expect(callbackLocation.queryParameters.containsKey('state'), isFalse);
+
+        // 3. Parse and validate callback without expectedState (#5)
+        final callbackParams = oauthClient.requestParser.parseRedirect(
+          callbackLocation,
+        );
+        oauthClient.validateCallback(callbackParams);
+
+        // 4. Exchange code without redirectUri (#4)
+        final tokenResult = await oauthClient.exchangeCode(
+          code: callbackParams.code!,
+          codeVerifier: verifier,
+        );
+        expect(tokenResult, isA<TokenSuccess>());
+        final tokenSuccess = tokenResult as TokenSuccess;
+
+        // 5. Call Shelf protected resource using OAuthAuthenticatedClient (#9)
+        final resourceHttpClient = OAuthAuthenticatedClient(
+          MockClient((req) async {
+            final shelfReq = shelf.Request(
+              req.method,
+              req.url,
+              headers: req.headers,
+            );
+            final shelfRes = await protectedResourceHandler(shelfReq);
+            return http.Response(
+              await shelfRes.readAsString(),
+              shelfRes.statusCode,
+              headers: shelfRes.headers,
+            );
+          }),
+          tokenSuccess.accessToken,
+        );
+
+        final apiRes = await resourceHttpClient.get(
+          Uri.parse('https://api.example.com/profile'),
+        );
+        expect(apiRes.statusCode, equals(200));
+        final apiJson = jsonDecode(apiRes.body) as Map<String, dynamic>;
+        expect(apiJson['userId'], equals('user-e2e'));
+        expect(apiJson['scope'], equals('read'));
+      },
+    );
   });
 }

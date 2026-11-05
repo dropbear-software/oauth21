@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import '../abnf_validators.dart';
 import '../redirect_uri_policy.dart';
 import '../value_objects/code_challenge.dart';
 
@@ -22,8 +23,8 @@ class AuthRequest {
   /// The client's redirection URI.
   final Uri redirectUri;
 
-  /// The state parameter used to prevent CSRF.
-  final String state;
+  /// The optional state parameter used to prevent CSRF.
+  final String? state;
 
   /// The PKCE code challenge.
   final CodeChallenge codeChallenge;
@@ -44,8 +45,8 @@ class AuthRequest {
     required this.authorizationEndpoint,
     required this.clientId,
     required this.redirectUri,
-    required this.state,
     required this.codeChallenge,
+    this.state,
     this.scope,
     this.customParameters = const {},
   }) {
@@ -73,32 +74,20 @@ class AuthRequest {
 
     // 3. Enforce scope ABNF syntax: 1*( %x21 / %x23-5B / %x5D-7E )
     if (scope != null && scope!.trim().isNotEmpty) {
-      final tokens = scope!.split(' ');
-      final tokenRegex = RegExp(r'^[\x21\x23-\x5B\x5D-\x7E]+$');
-      for (final token in tokens) {
-        if (token.isEmpty) {
-          throw ArgumentError(
-            'Malformed scope: contains consecutive or leading/trailing space delimiters.',
-          );
-        }
-        if (!tokenRegex.hasMatch(token)) {
-          throw ArgumentError(
-            'Malformed scope token "$token". Scope tokens must only contain characters in ranges %x21, %x23-5B, and %x5D-7E.',
-          );
-        }
+      if (!isValidScopeString(scope!)) {
+        throw ArgumentError(
+          'Malformed scope: scope tokens must be non-empty and only contain characters in ranges %x21, %x23-5B, and %x5D-7E.',
+        );
       }
     }
 
     // 4. Enforce VSCHAR syntax on client_id and state (ABNF range %x20-7E)
-    final vscharRegex = RegExp(r'^[\x20-\x7E]*$');
-    final vscharRequiredRegex = RegExp(r'^[\x20-\x7E]+$');
-
-    if (!vscharRegex.hasMatch(clientId)) {
+    if (!vscharOptionalRegex.hasMatch(clientId)) {
       throw ArgumentError(
         'client_id contains invalid characters. Must contain only printable ASCII characters (VSCHAR).',
       );
     }
-    if (!vscharRequiredRegex.hasMatch(state)) {
+    if (state != null && !vscharRequiredRegex.hasMatch(state!)) {
       throw ArgumentError(
         'state contains invalid characters or is empty. Must contain only printable ASCII characters (VSCHAR).',
       );
@@ -142,7 +131,7 @@ class AuthRequest {
       'response_type',
       'client_id',
       'redirect_uri',
-      'state',
+      if (state != null && state!.isNotEmpty) 'state',
       'code_challenge',
       'code_challenge_method',
       if (scope != null && scope!.isNotEmpty) 'scope',
@@ -179,7 +168,9 @@ class AuthRequest {
     queryParams['response_type'] = 'code';
     queryParams['client_id'] = clientId;
     queryParams['redirect_uri'] = redirectUri.toString();
-    queryParams['state'] = state;
+    if (state != null && state!.isNotEmpty) {
+      queryParams['state'] = state!;
+    }
     queryParams['code_challenge'] = codeChallenge.value;
     queryParams['code_challenge_method'] = codeChallenge.method;
 
