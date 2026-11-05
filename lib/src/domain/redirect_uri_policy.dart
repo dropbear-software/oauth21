@@ -4,6 +4,8 @@
 /// URI validation across client and server domain components.
 library;
 
+import 'abnf_validators.dart';
+
 final RegExp _reverseDomainSchemePattern = RegExp(
   r'^[a-z0-9]+(\.[a-z0-9-]+)+$',
 );
@@ -25,6 +27,40 @@ bool isLoopbackHost(String host) {
       normalized == '127.0.0.1' ||
       normalized == '::1' ||
       normalized == '[::1]';
+}
+
+/// Returns `true` if [uri] uses the `http` scheme on a valid loopback host
+/// (`localhost`, `127.0.0.1`, `::1`, or `[::1]`) with no userinfo or fragment.
+bool isLoopbackHttpUri(Uri uri) {
+  return uri.hasScheme &&
+      uri.scheme.toLowerCase() == 'http' &&
+      !uri.hasFragment &&
+      uri.hasAuthority &&
+      uri.host.isNotEmpty &&
+      uri.userInfo.isEmpty &&
+      isLoopbackHost(uri.host);
+}
+
+/// Returns `true` if [value] is a valid OAuth 2.1 Section 4.1.2 / Section
+/// 7.15.1 (`RFC 9207`) authorization server issuer URL (`iss`).
+///
+/// Requires:
+/// - `1*VSCHAR` syntax with no leading or trailing whitespace
+/// - Valid HTTP(S) endpoint URI (`https` scheme, or loopback `http` when
+///   [allowLoopbackHttp] is `true`) with a non-empty host and no userinfo
+/// - No query component (`!uri.hasQuery && !value.contains('?')`)
+/// - No fragment component (`!uri.hasFragment && !value.contains('#')`)
+bool isValidIssuerUri(String value, {bool allowLoopbackHttp = false}) {
+  if (!isValidVscharParam(value) ||
+      value.contains('?') ||
+      value.contains('#')) {
+    return false;
+  }
+  final uri = Uri.tryParse(value);
+  return uri != null &&
+      !uri.hasQuery &&
+      !uri.hasFragment &&
+      isAllowedHttpEndpointUri(uri, allowLoopbackHttp: allowLoopbackHttp);
 }
 
 /// Returns `true` if [uri] is a valid OAuth 2.1 HTTP(S) endpoint URI.

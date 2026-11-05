@@ -26,6 +26,11 @@ final RegExp codeVerifierAbnfRegex = RegExp(r'^[A-Za-z0-9\-._~]{43,128}$');
 /// "~" / "+" / "/" ) *"="`).
 final RegExp token68Regex = RegExp(r'^[A-Za-z0-9\-._~+/]+=*$');
 
+/// Matches OAuth 2.1 Appendix A.16 `param-name` and Appendix A.3 / A.10
+/// `type-name` / `grant-name` syntax (`1*name-char`, where
+/// `name-char = "-" / "." / "_" / DIGIT / ALPHA`).
+final RegExp paramNameAbnfRegex = RegExp(r'^[A-Za-z0-9\-._]+$');
+
 /// Returns `true` if [value] is non-empty, has no leading or trailing
 /// whitespace, and matches `1*VSCHAR` (`%x20-7E`).
 bool isValidVscharParam(String value) {
@@ -34,14 +39,12 @@ bool isValidVscharParam(String value) {
       vscharRequiredRegex.hasMatch(value);
 }
 
-/// Returns `true` if [scope] is a valid space-delimited list of `1*NQCHAR`
-/// scope tokens with no empty tokens (no leading, trailing, or consecutive
-/// spaces).
-///
-/// When [allowEmpty] is `true`, an empty string `""` is also accepted.
-bool isValidScopeString(String scope, {bool allowEmpty = false}) {
+/// Returns `true` if [scope] is a valid non-empty, space-delimited list of
+/// `1*NQCHAR` scope tokens with no empty tokens (no leading, trailing, or
+/// consecutive spaces).
+bool isValidScopeString(String scope) {
   if (scope.isEmpty) {
-    return allowEmpty;
+    return false;
   }
   final tokens = scope.split(' ');
   for (final token in tokens) {
@@ -60,6 +63,21 @@ Set<String>? parseAndDeduplicateScope(String scope) {
     return null;
   }
   return scope.split(' ').toSet();
+}
+
+/// Returns `true` if [value] matches `grant-type = grant-name / URI-reference`
+/// (Appendix A.10 and Section 6.3), where `grant-name = 1*name-char` and
+/// extension grant types are absolute URIs containing only `1*NQCHAR`
+/// characters without a fragment component.
+bool isValidGrantTypeParam(String value) {
+  if (paramNameAbnfRegex.hasMatch(value)) {
+    return true;
+  }
+  if (!nqcharRequiredRegex.hasMatch(value) || value.contains('#')) {
+    return false;
+  }
+  final parsed = Uri.tryParse(value);
+  return parsed != null && parsed.isAbsolute && !parsed.hasFragment;
 }
 
 /// Returns `true` if [value] matches `error-uri = 1*NQCHAR` (Appendix A.9) and
