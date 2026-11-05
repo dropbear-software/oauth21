@@ -123,58 +123,87 @@ class AuthorizeRequestValidator {
     }
 
     // 3. Redirect URI match
-    Uri validatedRedirectUri;
-    final reqRedirectStr = _singleNonEmptyValue(redirectUris);
+    final redirectResult = _resolveRedirectUri(
+      client,
+      _singleNonEmptyValue(redirectUris),
+    );
+    if (redirectResult.error != null) {
+      return redirectResult.error!;
+    }
+
+    // 4. Validate redirectable authorization parameters
+    return _validateRedirectableParameters(params, client, redirectResult.uri!);
+  }
+
+  ({Uri? uri, AuthorizeValidationResult? error}) _resolveRedirectUri(
+    ClientRegistration client,
+    String? reqRedirectStr,
+  ) {
     if (reqRedirectStr == null) {
-      if (client.redirectUris.length == 1) {
-        validatedRedirectUri = client.redirectUris.first;
-        if (!isAllowedRedirectUri(validatedRedirectUri)) {
-          return const AuthorizeValidationResult.invalid(
+      if (client.redirectUris.length != 1) {
+        return (
+          uri: null,
+          error: const AuthorizeValidationResult.invalid(
+            isRedirectable: false,
+            errorCode: 'invalid_request',
+            errorDescription:
+                'Missing redirect_uri, and client has multiple or zero '
+                'registered redirect URIs.',
+          ),
+        );
+      }
+      final defaultUri = client.redirectUris.first;
+      if (!isAllowedRedirectUri(defaultUri)) {
+        return (
+          uri: null,
+          error: const AuthorizeValidationResult.invalid(
             isRedirectable: false,
             errorCode: 'invalid_request',
             errorDescription:
                 'The redirect_uri is not an allowed OAuth 2.1 redirect URI.',
-          );
-        }
-      } else {
-        return const AuthorizeValidationResult.invalid(
-          isRedirectable: false,
-          errorCode: 'invalid_request',
-          errorDescription:
-              'Missing redirect_uri, and client has multiple or zero '
-              'registered redirect URIs.',
+          ),
         );
       }
-    } else {
-      try {
-        validatedRedirectUri = Uri.parse(reqRedirectStr);
-      } on FormatException catch (_) {
-        return const AuthorizeValidationResult.invalid(
+      return (uri: defaultUri, error: null);
+    }
+
+    final requestedUri = Uri.tryParse(reqRedirectStr);
+    if (requestedUri == null) {
+      return (
+        uri: null,
+        error: const AuthorizeValidationResult.invalid(
           isRedirectable: false,
           errorCode: 'invalid_request',
           errorDescription: 'Malformed redirect_uri parameter.',
-        );
-      }
+        ),
+      );
+    }
 
-      if (_hasRawDotSegment(reqRedirectStr) ||
-          !isAllowedRedirectUri(validatedRedirectUri) ||
-          !_isRedirectUriAllowed(
-            client,
-            validatedRedirectUri,
-            reqRedirectStr,
-          )) {
-        return const AuthorizeValidationResult.invalid(
+    if (_hasRawDotSegment(reqRedirectStr) ||
+        !isAllowedRedirectUri(requestedUri) ||
+        !_isRedirectUriAllowed(client, requestedUri, reqRedirectStr)) {
+      return (
+        uri: null,
+        error: const AuthorizeValidationResult.invalid(
           isRedirectable: false,
           errorCode: 'invalid_request',
           errorDescription:
               'Requested redirect_uri is not registered for this client.',
-        );
-      }
+        ),
+      );
     }
 
+    return (uri: requestedUri, error: null);
+  }
+
+  AuthorizeValidationResult _validateRedirectableParameters(
+    Map<String, List<String>> params,
+    ClientRegistration client,
+    Uri validatedRedirectUri,
+  ) {
     // From this point onward, errors can be redirected back to the client's
     // validatedRedirectUri. Extract and validate optional "state" (Section 4.1.1).
-    final states = params['state'] ?? [];
+    final states = params['state'] ?? const [];
     if (states.length > 1) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
@@ -249,46 +278,12 @@ class AuthorizeRequestValidator {
     }
 
     // Validate PKCE (code_challenge and code_challenge_method are mandatory)
-    final codeChallenge = _singleNonEmptyValue(params['code_challenge']);
-    if (codeChallenge == null) {
+    final pkce = _validatePkceParameters(params);
+    if (pkce.errorDescription != null) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
-        errorDescription: 'Missing code_challenge parameter.',
-        client: client,
-        validatedRedirectUri: validatedRedirectUri,
-        state: state,
-      );
-    }
-    if (!codeVerifierAbnfRegex.hasMatch(codeChallenge)) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'code_challenge violates ABNF constraints.',
-        client: client,
-        validatedRedirectUri: validatedRedirectUri,
-        state: state,
-      );
-    }
-
-    final codeChallengeMethod = _singleNonEmptyValue(
-      params['code_challenge_method'],
-    );
-    if (codeChallengeMethod == null) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'Missing code_challenge_method parameter.',
-        client: client,
-        validatedRedirectUri: validatedRedirectUri,
-        state: state,
-      );
-    }
-    if (codeChallengeMethod != 'S256') {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'The code_challenge_method must be "S256".',
+        errorDescription: pkce.errorDescription,
         client: client,
         validatedRedirectUri: validatedRedirectUri,
         state: state,
@@ -296,47 +291,100 @@ class AuthorizeRequestValidator {
     }
 
     // Validate scope (if present)
-    final scopeStr = _singleNonEmptyValue(params['scope']);
-    final requestedScopes = <String>{};
-    if (scopeStr != null) {
-      final parsedScopes = parseAndDeduplicateScope(scopeStr);
-      if (parsedScopes == null) {
-        return AuthorizeValidationResult.invalid(
-          isRedirectable: true,
-          errorCode: 'invalid_scope',
-          errorDescription: 'The requested scope is malformed.',
-          client: client,
-          validatedRedirectUri: validatedRedirectUri,
-          state: state,
-        );
-      }
-      for (final token in parsedScopes) {
-        if (!client.allowedScopes.contains(token)) {
-          return AuthorizeValidationResult.invalid(
-            isRedirectable: true,
-            errorCode: 'invalid_scope',
-            errorDescription:
-                'Scope token "$token" is not allowed for this client.',
-            client: client,
-            validatedRedirectUri: validatedRedirectUri,
-            state: state,
-          );
-        }
-        requestedScopes.add(token);
-      }
-    } else {
-      // Default to client's allowed scopes if parameter is omitted.
-      requestedScopes.addAll(client.allowedScopes);
+    final scopeResult = _resolveRequestedScopes(
+      client,
+      _singleNonEmptyValue(params['scope']),
+    );
+    if (scopeResult.errorDescription != null) {
+      return AuthorizeValidationResult.invalid(
+        isRedirectable: true,
+        errorCode: 'invalid_scope',
+        errorDescription: scopeResult.errorDescription,
+        client: client,
+        validatedRedirectUri: validatedRedirectUri,
+        state: state,
+      );
     }
 
     return AuthorizeValidationResult.valid(
       client: client,
       validatedRedirectUri: validatedRedirectUri,
       state: state,
-      requestedScopes: requestedScopes,
+      requestedScopes: scopeResult.scopes!,
+      codeChallenge: pkce.codeChallenge!,
+      codeChallengeMethod: pkce.codeChallengeMethod!,
+    );
+  }
+
+  ({
+    String? codeChallenge,
+    String? codeChallengeMethod,
+    String? errorDescription,
+  })
+  _validatePkceParameters(Map<String, List<String>> params) {
+    final codeChallenge = _singleNonEmptyValue(params['code_challenge']);
+    if (codeChallenge == null) {
+      return (
+        codeChallenge: null,
+        codeChallengeMethod: null,
+        errorDescription: 'Missing code_challenge parameter.',
+      );
+    }
+    if (!codeVerifierAbnfRegex.hasMatch(codeChallenge)) {
+      return (
+        codeChallenge: null,
+        codeChallengeMethod: null,
+        errorDescription: 'code_challenge violates ABNF constraints.',
+      );
+    }
+
+    final codeChallengeMethod = _singleNonEmptyValue(
+      params['code_challenge_method'],
+    );
+    if (codeChallengeMethod == null) {
+      return (
+        codeChallenge: null,
+        codeChallengeMethod: null,
+        errorDescription: 'Missing code_challenge_method parameter.',
+      );
+    }
+    if (codeChallengeMethod != 'S256') {
+      return (
+        codeChallenge: null,
+        codeChallengeMethod: null,
+        errorDescription: 'The code_challenge_method must be "S256".',
+      );
+    }
+
+    return (
       codeChallenge: codeChallenge,
       codeChallengeMethod: codeChallengeMethod,
+      errorDescription: null,
     );
+  }
+
+  static ({Set<String>? scopes, String? errorDescription})
+  _resolveRequestedScopes(ClientRegistration client, String? scopeStr) {
+    if (scopeStr == null) {
+      return (scopes: {...client.allowedScopes}, errorDescription: null);
+    }
+    final parsedScopes = parseAndDeduplicateScope(scopeStr);
+    if (parsedScopes == null) {
+      return (
+        scopes: null,
+        errorDescription: 'The requested scope is malformed.',
+      );
+    }
+    for (final token in parsedScopes) {
+      if (!client.allowedScopes.contains(token)) {
+        return (
+          scopes: null,
+          errorDescription:
+              'Scope token "$token" is not allowed for this client.',
+        );
+      }
+    }
+    return (scopes: parsedScopes, errorDescription: null);
   }
 
   String? _singleNonEmptyValue(List<String>? values) {

@@ -49,128 +49,121 @@ sealed class TokenResult {
 
     // 3. Handle OAuth Error Response
     if (json.containsKey('error')) {
-      if (statusCode != null && statusCode < 400) {
-        throw FormatException(
-          'Invalid HTTP status code $statusCode for token error response; expected >= 400.',
-        );
-      }
-
-      final error = json['error'];
-      if (error is! String || error.isEmpty) {
-        throw const FormatException(
-          'Invalid "error" field in token error response.',
-        );
-      }
-
-      // Enforce strictly ASCII NQSCHAR syntax: %x20-21 / %x23-5B / %x5D-7E
-      if (!nqscharRequiredRegex.hasMatch(error)) {
-        throw const FormatException(
-          'Security violation: "error" field contains invalid characters violating ABNF NQSCHAR syntax.',
-        );
-      }
-
-      final errorDescription = json['error_description'];
-      if (errorDescription != null) {
-        if (errorDescription is! String ||
-            (errorDescription.isNotEmpty &&
-                !nqscharRequiredRegex.hasMatch(errorDescription))) {
-          throw const FormatException(
-            'Security violation: "error_description" field contains invalid characters violating ABNF NQSCHAR syntax.',
-          );
-        }
-      }
-
-      final errorUri = json['error_uri'];
-      if (errorUri != null) {
-        if (errorUri is! String || !isValidErrorUri(errorUri)) {
-          throw const FormatException(
-            'Security violation: "error_uri" is not a valid absolute URI or contains invalid characters.',
-          );
-        }
-      }
-
-      return TokenError(
-        error: error,
-        errorDescription: errorDescription as String?,
-        errorUri: errorUri as String?,
-      );
+      return _parseTokenError(json, statusCode);
     }
 
     // 4. Handle OAuth Success Response
-    if (statusCode != null && statusCode != 200) {
-      throw FormatException(
-        'Invalid HTTP status code $statusCode for token success response; expected 200.',
-      );
-    }
+    return _parseTokenSuccess(json, statusCode);
+  }
+}
 
-    final accessToken = json['access_token'];
-    final tokenType = json['token_type'];
+final RegExp _tokenTypeNameRegex = RegExp(r'^[A-Za-z0-9\-._]+$');
 
-    if (accessToken is! String || !vscharRequiredRegex.hasMatch(accessToken)) {
-      throw const FormatException(
-        'Missing or invalid "access_token" in response: must be a non-empty VSCHAR string.',
-      );
-    }
-    if (tokenType is! String || tokenType.isEmpty) {
-      throw const FormatException(
-        'Missing or invalid "token_type" in response.',
-      );
-    }
-
-    // Validate token_type (type-name = 1*name-char where name-char = "-" / "." / "_" / DIGIT / ALPHA, or absolute URI)
-    final typeNameRegex = RegExp(r'^[A-Za-z0-9\-._]+$');
-    final parsedUri = Uri.tryParse(tokenType);
-    final isAbsoluteUri = parsedUri != null && parsedUri.isAbsolute;
-
-    if (!typeNameRegex.hasMatch(tokenType) && !isAbsoluteUri) {
-      throw FormatException(
-        'Invalid token_type format in response: "$tokenType". '
-        'Must conform to type-name ABNF or be a valid absolute URI.',
-      );
-    }
-
-    int? expiresIn;
-    if (json.containsKey('expires_in')) {
-      final exp = json['expires_in'];
-      if (exp is! int || exp <= 0) {
-        throw const FormatException(
-          'Invalid "expires_in" parameter in response: must be a positive integer JSON number.',
-        );
-      }
-      expiresIn = exp;
-    }
-
-    String? refreshToken;
-    if (json.containsKey('refresh_token') && json['refresh_token'] != null) {
-      final rt = json['refresh_token'];
-      if (rt is! String || !vscharRequiredRegex.hasMatch(rt)) {
-        throw const FormatException(
-          'Invalid "refresh_token" parameter in response: must be a non-empty VSCHAR string.',
-        );
-      }
-      refreshToken = rt;
-    }
-
-    String? scope;
-    if (json.containsKey('scope') && json['scope'] != null) {
-      final sc = json['scope'];
-      if (sc is! String || !isValidScopeString(sc, allowEmpty: true)) {
-        throw const FormatException(
-          'Invalid "scope" parameter in response: must be a String of valid NQCHAR scope tokens.',
-        );
-      }
-      scope = sc;
-    }
-
-    return TokenSuccess(
-      accessToken: accessToken,
-      tokenType: tokenType,
-      expiresIn: expiresIn,
-      refreshToken: refreshToken,
-      scope: scope,
-      rawPayload: json,
+TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
+  if (statusCode != null && statusCode < 400) {
+    throw FormatException(
+      'Invalid HTTP status code $statusCode for token error response; expected >= 400.',
     );
   }
+
+  final error = json['error'];
+  if (error is! String || error.isEmpty) {
+    throw const FormatException(
+      'Invalid "error" field in token error response.',
+    );
+  }
+
+  // Enforce strictly ASCII NQSCHAR syntax: %x20-21 / %x23-5B / %x5D-7E
+  if (!nqscharRequiredRegex.hasMatch(error)) {
+    throw const FormatException(
+      'Security violation: "error" field contains invalid characters violating ABNF NQSCHAR syntax.',
+    );
+  }
+
+  final errorDescription = json['error_description'];
+  if (errorDescription is! String? ||
+      (errorDescription != null &&
+          errorDescription.isNotEmpty &&
+          !nqscharRequiredRegex.hasMatch(errorDescription))) {
+    throw const FormatException(
+      'Security violation: "error_description" field contains invalid characters violating ABNF NQSCHAR syntax.',
+    );
+  }
+
+  final errorUri = json['error_uri'];
+  if (errorUri is! String? ||
+      (errorUri != null && !isValidErrorUri(errorUri))) {
+    throw const FormatException(
+      'Security violation: "error_uri" is not a valid absolute URI or contains invalid characters.',
+    );
+  }
+
+  return TokenError(
+    error: error,
+    errorDescription: errorDescription,
+    errorUri: errorUri,
+  );
+}
+
+TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
+  if (statusCode != null && statusCode != 200) {
+    throw FormatException(
+      'Invalid HTTP status code $statusCode for token success response; expected 200.',
+    );
+  }
+
+  final accessToken = json['access_token'];
+  if (accessToken is! String || !vscharRequiredRegex.hasMatch(accessToken)) {
+    throw const FormatException(
+      'Missing or invalid "access_token" in response: must be a non-empty VSCHAR string.',
+    );
+  }
+
+  final tokenType = json['token_type'];
+  if (tokenType is! String || tokenType.isEmpty) {
+    throw const FormatException('Missing or invalid "token_type" in response.');
+  }
+
+  // Validate token_type (type-name = 1*name-char where name-char = "-" / "." / "_" / DIGIT / ALPHA, or absolute URI)
+  final isAbsoluteUri = Uri.tryParse(tokenType)?.isAbsolute ?? false;
+  if (!_tokenTypeNameRegex.hasMatch(tokenType) && !isAbsoluteUri) {
+    throw FormatException(
+      'Invalid token_type format in response: "$tokenType". '
+      'Must conform to type-name ABNF or be a valid absolute URI.',
+    );
+  }
+
+  final expiresIn = json['expires_in'];
+  if (expiresIn is! int? || (expiresIn != null && expiresIn <= 0)) {
+    throw const FormatException(
+      'Invalid "expires_in" parameter in response: must be a positive integer JSON number.',
+    );
+  }
+
+  final refreshToken = json['refresh_token'];
+  if (refreshToken is! String? ||
+      (refreshToken != null && !vscharRequiredRegex.hasMatch(refreshToken))) {
+    throw const FormatException(
+      'Invalid "refresh_token" parameter in response: must be a non-empty VSCHAR string.',
+    );
+  }
+
+  final scope = json['scope'];
+  if (scope is! String? ||
+      (scope != null && !isValidScopeString(scope, allowEmpty: true))) {
+    throw const FormatException(
+      'Invalid "scope" parameter in response: must be a String of valid NQCHAR scope tokens.',
+    );
+  }
+
+  return TokenSuccess(
+    accessToken: accessToken,
+    tokenType: tokenType,
+    expiresIn: expiresIn,
+    refreshToken: refreshToken,
+    scope: scope,
+    rawPayload: json,
+  );
 }
 
 /// Represents a successful token exchange response.

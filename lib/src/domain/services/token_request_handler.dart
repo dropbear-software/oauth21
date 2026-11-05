@@ -87,190 +87,25 @@ class TokenRequestHandler {
     };
 
     // 2. Client Authentication
-    String? clientId;
-    String? clientSecret;
-    var attemptedBasic = false;
-    var attemptedBody = false;
-
-    if (authorizationHeader != null && authorizationHeader.trim().isNotEmpty) {
-      final trimmedHeader = authorizationHeader.trim();
-      if (!_basicSchemePrefix.hasMatch(trimmedHeader)) {
-        return const ServerTokenResponse(
-          statusCode: 401,
-          body: {
-            'error': 'invalid_client',
-            'error_description': 'Unsupported Authorization header scheme.',
-          },
-          headers: _unauthorizedHeaders,
-        );
-      }
-
-      attemptedBasic = true;
-      final base64Credentials = trimmedHeader
-          .replaceFirst(_basicSchemePrefix, '')
-          .trim();
-      try {
-        final decoded = utf8.decode(base64.decode(base64Credentials));
-        final parts = decoded.split(':');
-        if (parts.length != 2 || parts[0].isEmpty) {
-          return const ServerTokenResponse(
-            statusCode: 401,
-            body: {
-              'error': 'invalid_client',
-              'error_description': 'Malformed Authorization header.',
-            },
-            headers: _unauthorizedHeaders,
-          );
-        }
-        clientId = Uri.decodeQueryComponent(parts[0]);
-        clientSecret = Uri.decodeQueryComponent(parts[1]);
-        if (!isValidVscharParam(clientId) ||
-            !vscharOptionalRegex.hasMatch(clientSecret)) {
-          return const ServerTokenResponse(
-            statusCode: 401,
-            body: {
-              'error': 'invalid_client',
-              'error_description':
-                  'Client credentials in Authorization header violate VSCHAR syntax.',
-            },
-            headers: _unauthorizedHeaders,
-          );
-        }
-      } on Object catch (_) {
-        return const ServerTokenResponse(
-          statusCode: 401,
-          body: {
-            'error': 'invalid_client',
-            'error_description': 'Malformed Authorization header.',
-          },
-          headers: _unauthorizedHeaders,
-        );
-      }
+    final credentials = _extractClientCredentials(body, authorizationHeader);
+    if (credentials.error != null) {
+      return credentials.error!;
     }
 
-    if (body['client_secret'] != null) {
-      attemptedBody = true;
-    }
-
-    if (attemptedBasic && attemptedBody) {
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_request',
-          'error_description':
-              'Multiple client authentication methods attempted.',
-        },
-        headers: _headers,
-      );
-    }
-
-    if (attemptedBasic &&
-        body['client_id'] != null &&
-        body['client_id'] != clientId) {
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_request',
-          'error_description':
-              'Conflicting client_id in Authorization header and request body.',
-        },
-        headers: _headers,
-      );
-    }
-
-    if (attemptedBody) {
-      clientId = body['client_id'];
-      clientSecret = body['client_secret'];
-    } else if (clientId == null && body['client_id'] != null) {
-      clientId = body['client_id'];
-    }
-
-    if (clientId == null) {
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_request',
-          'error_description': 'Missing client_id.',
-        },
-        headers: _headers,
-      );
-    }
-
-    if (!isValidVscharParam(clientId) ||
-        (clientSecret != null && !vscharOptionalRegex.hasMatch(clientSecret))) {
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_request',
-          'error_description':
-              'Client credentials contain invalid characters or untrimmed whitespace.',
-        },
-        headers: _headers,
-      );
-    }
-
-    final client = await clientRepository.findById(clientId);
+    final client = await clientRepository.findById(credentials.clientId!);
     if (client == null) {
-      return const ServerTokenResponse(
-        statusCode: 401,
-        body: {
-          'error': 'invalid_client',
-          'error_description': 'Client registration not found.',
-        },
-        headers: _unauthorizedHeaders,
-      );
+      return _invalidClient('Client registration not found.');
     }
 
-    // Authenticate confidential client
-    if (client.clientType == ClientType.confidential) {
-      if (clientSecret == null) {
-        return const ServerTokenResponse(
-          statusCode: 401,
-          body: {
-            'error': 'invalid_client',
-            'error_description': 'Client credentials required.',
-          },
-          headers: _unauthorizedHeaders,
-        );
-      }
-      final registeredHash = client.clientSecretHash;
-      if (registeredHash == null ||
-          !cryptoService.verifyPasswordHash(clientSecret, registeredHash)) {
-        return const ServerTokenResponse(
-          statusCode: 401,
-          body: {
-            'error': 'invalid_client',
-            'error_description': 'Client authentication failed.',
-          },
-          headers: _unauthorizedHeaders,
-        );
-      }
-    } else {
-      // Public clients must not use a secret
-      if (clientSecret != null) {
-        return const ServerTokenResponse(
-          statusCode: 400,
-          body: {
-            'error': 'invalid_request',
-            'error_description':
-                'Public clients must not provide a client secret.',
-          },
-          headers: _headers,
-        );
-      }
+    final authError = _verifyClientSecret(client, credentials.clientSecret);
+    if (authError != null) {
+      return authError;
     }
 
     // 3. Grant Type routing
     final grantType = body['grant_type'];
-    if (grantType == null || grantType.isEmpty) {
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_request',
-          'error_description': 'Missing grant_type parameter.',
-        },
-        headers: _headers,
-      );
+    if (grantType == null) {
+      return _badRequest('Missing grant_type parameter.');
     }
 
     if (!client.allowedGrantTypes.contains(grantType)) {
@@ -285,22 +120,149 @@ class TokenRequestHandler {
       );
     }
 
-    switch (grantType) {
-      case 'authorization_code':
-        return _handleAuthorizationCode(body, client);
-      case 'client_credentials':
-        return _handleClientCredentials(body, client);
-      case 'refresh_token':
-        return _handleRefreshToken(body, client);
-      default:
-        return const ServerTokenResponse(
+    return switch (grantType) {
+      'authorization_code' => _handleAuthorizationCode(body, client),
+      'client_credentials' => _handleClientCredentials(body, client),
+      'refresh_token' => _handleRefreshToken(body, client),
+      _ => Future.value(
+        const ServerTokenResponse(
           statusCode: 400,
           body: {
             'error': 'unsupported_grant_type',
             'error_description': 'Unsupported grant type.',
           },
           headers: _headers,
+        ),
+      ),
+    };
+  }
+
+  ServerTokenResponse? _verifyClientSecret(
+    ClientRegistration client,
+    String? clientSecret,
+  ) {
+    if (client.clientType == ClientType.confidential) {
+      if (clientSecret == null) {
+        return _invalidClient('Client credentials required.');
+      }
+      final registeredHash = client.clientSecretHash;
+      if (registeredHash == null ||
+          !cryptoService.verifyPasswordHash(clientSecret, registeredHash)) {
+        return _invalidClient('Client authentication failed.');
+      }
+    } else if (clientSecret != null) {
+      // Public clients must not use a secret
+      return _badRequest('Public clients must not provide a client secret.');
+    }
+    return null;
+  }
+
+  static ServerTokenResponse _badRequest(String description) =>
+      ServerTokenResponse(
+        statusCode: 400,
+        body: {'error': 'invalid_request', 'error_description': description},
+        headers: _headers,
+      );
+
+  static ServerTokenResponse _invalidClient(String description) =>
+      ServerTokenResponse(
+        statusCode: 401,
+        body: {'error': 'invalid_client', 'error_description': description},
+        headers: _unauthorizedHeaders,
+      );
+
+  static ({String? clientId, String? clientSecret, ServerTokenResponse? error})
+  _credentialsError(ServerTokenResponse error) =>
+      (clientId: null, clientSecret: null, error: error);
+
+  static ({String? clientId, String? clientSecret, ServerTokenResponse? error})
+  _extractClientCredentials(
+    Map<String, String> body,
+    String? authorizationHeader,
+  ) {
+    String? basicClientId;
+    String? basicSecret;
+    if (authorizationHeader != null && authorizationHeader.trim().isNotEmpty) {
+      final basic = _parseBasicAuthorization(authorizationHeader.trim());
+      if (basic.error != null) {
+        return basic;
+      }
+      basicClientId = basic.clientId;
+      basicSecret = basic.clientSecret;
+    }
+
+    final bodyClientId = body['client_id'];
+    final bodySecret = body['client_secret'];
+
+    if (basicClientId != null && bodySecret != null) {
+      return _credentialsError(
+        _badRequest('Multiple client authentication methods attempted.'),
+      );
+    }
+
+    if (basicClientId != null &&
+        bodyClientId != null &&
+        bodyClientId != basicClientId) {
+      return _credentialsError(
+        _badRequest(
+          'Conflicting client_id in Authorization header and request body.',
+        ),
+      );
+    }
+
+    final clientId = basicClientId ?? bodyClientId;
+    final clientSecret = basicSecret ?? bodySecret;
+
+    if (clientId == null) {
+      return _credentialsError(_badRequest('Missing client_id.'));
+    }
+
+    if (!isValidVscharParam(clientId) ||
+        (clientSecret != null && !vscharOptionalRegex.hasMatch(clientSecret))) {
+      return _credentialsError(
+        _badRequest(
+          'Client credentials contain invalid characters or untrimmed whitespace.',
+        ),
+      );
+    }
+
+    return (clientId: clientId, clientSecret: clientSecret, error: null);
+  }
+
+  static ({String? clientId, String? clientSecret, ServerTokenResponse? error})
+  _parseBasicAuthorization(String trimmedHeader) {
+    if (!_basicSchemePrefix.hasMatch(trimmedHeader)) {
+      return _credentialsError(
+        _invalidClient('Unsupported Authorization header scheme.'),
+      );
+    }
+
+    final base64Credentials = trimmedHeader
+        .replaceFirst(_basicSchemePrefix, '')
+        .trim();
+    try {
+      final decoded = utf8.decode(base64.decode(base64Credentials));
+      final parts = decoded.split(':');
+      if (parts.length != 2 || parts[0].isEmpty) {
+        return _credentialsError(
+          _invalidClient('Malformed Authorization header.'),
         );
+      }
+      final clientId = Uri.decodeQueryComponent(parts[0]);
+      final clientSecret = Uri.decodeQueryComponent(parts[1]);
+      if (!isValidVscharParam(clientId) ||
+          !vscharOptionalRegex.hasMatch(clientSecret)) {
+        return _credentialsError(
+          _invalidClient(
+            'Client credentials in Authorization header violate VSCHAR syntax.',
+          ),
+        );
+      }
+      return (clientId: clientId, clientSecret: clientSecret, error: null);
+    } on Object catch (_) {
+      return _credentialsError(
+        _invalidClient('Malformed Authorization header.'),
+      );
     }
   }
 
