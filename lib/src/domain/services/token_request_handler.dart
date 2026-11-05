@@ -1,6 +1,7 @@
 import 'dart:convert';
 import '../abnf_validators.dart';
 import '../entities/access_token.dart';
+import '../entities/auth_code.dart';
 import '../entities/client_registration.dart';
 import '../entities/refresh_token.dart';
 import '../ports/auth_code_repository.dart';
@@ -365,19 +366,7 @@ class TokenRequestHandler {
 
     // Code reuse check (Must revoke everything issued by it, even if expired)
     if (authCode.isUsed) {
-      await _revokeCompromisedCodeFamily(
-        code: code,
-        clientId: authCode.clientId,
-        userId: authCode.userId,
-      );
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_grant',
-          'error_description': 'Authorization code has already been used.',
-        },
-        headers: _headers,
-      );
+      return _revokeCompromisedCodeFamily(authCode);
     }
 
     // Check expiration
@@ -395,19 +384,7 @@ class TokenRequestHandler {
     // Atomically consume authorization code (Compare-And-Swap false -> true)
     final consumed = await authCodeRepository.tryConsume(code);
     if (!consumed) {
-      await _revokeCompromisedCodeFamily(
-        code: code,
-        clientId: authCode.clientId,
-        userId: authCode.userId,
-      );
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_grant',
-          'error_description': 'Authorization code has already been used.',
-        },
-        headers: _headers,
-      );
+      return _revokeCompromisedCodeFamily(authCode);
     }
 
     // Build and persist tokens carrying authorizationCode lineage
@@ -423,19 +400,7 @@ class TokenRequestHandler {
       refreshToken: pair.refreshToken,
     );
     if (!saved) {
-      await _revokeCompromisedCodeFamily(
-        code: code,
-        clientId: authCode.clientId,
-        userId: authCode.userId,
-      );
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_grant',
-          'error_description': 'Authorization code has already been used.',
-        },
-        headers: _headers,
-      );
+      return _revokeCompromisedCodeFamily(authCode);
     }
 
     return pair.response;
@@ -457,42 +422,20 @@ class TokenRequestHandler {
       );
     }
 
-    // Scope validation
-    final requestedScope = body['scope'];
-    String? scope;
-    if (requestedScope != null && requestedScope.isNotEmpty) {
-      final parsedScopes = parseAndDeduplicateScope(requestedScope);
-      if (parsedScopes == null) {
-        return const ServerTokenResponse(
-          statusCode: 400,
-          body: {
-            'error': 'invalid_scope',
-            'error_description': 'Requested scope is malformed.',
-          },
-          headers: _headers,
-        );
-      }
-      for (final token in parsedScopes) {
-        if (!client.allowedScopes.contains(token)) {
-          return const ServerTokenResponse(
-            statusCode: 400,
-            body: {
-              'error': 'invalid_scope',
-              'error_description': 'Requested scope is not allowed.',
-            },
-            headers: _headers,
-          );
-        }
-      }
-      scope = parsedScopes.join(' ');
-    } else {
-      scope = client.allowedScopes.join(' ');
+    final scopeResult = _resolveTokenScope(
+      requestedScope: body['scope'],
+      allowedScopes: client.allowedScopes,
+      defaultScope: client.allowedScopes.join(' '),
+      disallowedDescription: 'Requested scope is not allowed.',
+    );
+    if (scopeResult.error != null) {
+      return scopeResult.error!;
     }
 
     final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: null,
-      scope: scope,
+      scope: scopeResult.scope,
       issueRefreshToken: false,
     );
     await tokenRepository.saveAccessToken(pair.accessToken);
@@ -554,16 +497,7 @@ class TokenRequestHandler {
       final alreadyUsedGrace = oldRefreshToken.usedInGraceWindow;
 
       if (!isWithinGrace || alreadyUsedGrace) {
-        await _revokeCompromisedRefreshFamily(oldRefreshToken);
-        return const ServerTokenResponse(
-          statusCode: 400,
-          body: {
-            'error': 'invalid_grant',
-            'error_description':
-                'Refresh token has already been used. Grant revoked.',
-          },
-          headers: _headers,
-        );
+        return _revokeCompromisedRefreshFamily(oldRefreshToken);
       }
     }
 
@@ -580,44 +514,22 @@ class TokenRequestHandler {
     }
 
     // Scope validation (MUST run before mutating/revoking oldRefreshToken)
-    final requestedScope = body['scope'];
-    String? scope;
-    if (requestedScope != null && requestedScope.isNotEmpty) {
-      final parsedScopes = parseAndDeduplicateScope(requestedScope);
-      if (parsedScopes == null) {
-        return const ServerTokenResponse(
-          statusCode: 400,
-          body: {
-            'error': 'invalid_scope',
-            'error_description': 'Requested scope is malformed.',
-          },
-          headers: _headers,
-        );
-      }
-      final originalScopes = oldRefreshToken.scope?.split(' ').toSet() ?? {};
-      for (final token in parsedScopes) {
-        if (!originalScopes.contains(token)) {
-          return const ServerTokenResponse(
-            statusCode: 400,
-            body: {
-              'error': 'invalid_scope',
-              'error_description':
-                  'Requested scope exceeds originally granted scope.',
-            },
-            headers: _headers,
-          );
-        }
-      }
-      scope = parsedScopes.join(' ');
-    } else {
-      scope = oldRefreshToken.scope;
+    final scopeResult = _resolveTokenScope(
+      requestedScope: body['scope'],
+      allowedScopes: oldRefreshToken.scope?.split(' ').toSet() ?? const {},
+      defaultScope: oldRefreshToken.scope,
+      disallowedDescription:
+          'Requested scope exceeds originally granted scope.',
+    );
+    if (scopeResult.error != null) {
+      return scopeResult.error!;
     }
 
     // Atomically rotate refresh token and persist replacement token pair
     final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: oldRefreshToken.userId,
-      scope: scope,
+      scope: scopeResult.scope,
       issueRefreshToken: true,
       authorizationCode: oldRefreshToken.authorizationCode,
       refreshExpiresAt: oldRefreshToken.expiresAt,
@@ -628,37 +540,89 @@ class TokenRequestHandler {
       newRefreshToken: pair.refreshToken!,
     );
     if (!rotated) {
-      await _revokeCompromisedRefreshFamily(oldRefreshToken);
-      return const ServerTokenResponse(
-        statusCode: 400,
-        body: {
-          'error': 'invalid_grant',
-          'error_description':
-              'Refresh token has already been used. Grant revoked.',
-        },
-        headers: _headers,
-      );
+      return _revokeCompromisedRefreshFamily(oldRefreshToken);
     }
 
     return pair.response;
   }
 
-  Future<void> _revokeCompromisedCodeFamily({
-    required String code,
-    required String clientId,
-    required String? userId,
-  }) async {
-    await tokenRepository.revokeByAuthorizationCode(code);
-    await tokenRepository.revokeAllTokensForClientAndUser(clientId, userId);
+  static ({String? scope, ServerTokenResponse? error}) _resolveTokenScope({
+    required String? requestedScope,
+    required Set<String> allowedScopes,
+    required String? defaultScope,
+    required String disallowedDescription,
+  }) {
+    if (requestedScope == null || requestedScope.isEmpty) {
+      return (scope: defaultScope, error: null);
+    }
+    final parsedScopes = parseAndDeduplicateScope(requestedScope);
+    if (parsedScopes == null) {
+      return (
+        scope: null,
+        error: const ServerTokenResponse(
+          statusCode: 400,
+          body: {
+            'error': 'invalid_scope',
+            'error_description': 'Requested scope is malformed.',
+          },
+          headers: _headers,
+        ),
+      );
+    }
+    for (final token in parsedScopes) {
+      if (!allowedScopes.contains(token)) {
+        return (
+          scope: null,
+          error: ServerTokenResponse(
+            statusCode: 400,
+            body: {
+              'error': 'invalid_scope',
+              'error_description': disallowedDescription,
+            },
+            headers: _headers,
+          ),
+        );
+      }
+    }
+    return (scope: parsedScopes.join(' '), error: null);
   }
 
-  Future<void> _revokeCompromisedRefreshFamily(RefreshToken token) async {
+  Future<ServerTokenResponse> _revokeCompromisedCodeFamily(
+    AuthCode authCode,
+  ) async {
+    await tokenRepository.revokeByAuthorizationCode(authCode.code);
+    await tokenRepository.revokeAllTokensForClientAndUser(
+      authCode.clientId,
+      authCode.userId,
+    );
+    return const ServerTokenResponse(
+      statusCode: 400,
+      body: {
+        'error': 'invalid_grant',
+        'error_description': 'Authorization code has already been used.',
+      },
+      headers: _headers,
+    );
+  }
+
+  Future<ServerTokenResponse> _revokeCompromisedRefreshFamily(
+    RefreshToken token,
+  ) async {
     if (token.authorizationCode != null) {
       await tokenRepository.revokeByAuthorizationCode(token.authorizationCode!);
     }
     await tokenRepository.revokeAllTokensForClientAndUser(
       token.clientId,
       token.userId,
+    );
+    return const ServerTokenResponse(
+      statusCode: 400,
+      body: {
+        'error': 'invalid_grant',
+        'error_description':
+            'Refresh token has already been used. Grant revoked.',
+      },
+      headers: _headers,
     );
   }
 

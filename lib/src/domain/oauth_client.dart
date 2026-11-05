@@ -133,7 +133,7 @@ class OAuthClient {
     required String code,
     required CodeVerifier codeVerifier,
     Uri? redirectUri,
-  }) async {
+  }) {
     final body = {
       'grant_type': 'authorization_code',
       'code': code,
@@ -145,17 +145,7 @@ class OAuthClient {
       body['redirect_uri'] = redirectUri.toString();
     }
 
-    final response = await httpClient.post(
-      Uri.parse(tokenEndpoint),
-      headers: _buildTokenRequestHeaders(),
-      body: body,
-    );
-
-    return TokenResult.fromResponse(
-      body: response.body,
-      headers: response.headers,
-      statusCode: response.statusCode,
-    );
+    return _sendTokenRequest(body);
   }
 
   /// Exchanges a [refreshToken] for a new set of tokens via back-channel POST.
@@ -164,7 +154,7 @@ class OAuthClient {
   Future<TokenResult> exchangeRefreshToken(
     String refreshToken, {
     String? scope,
-  }) async {
+  }) {
     if (!isValidVscharParam(refreshToken)) {
       throw ArgumentError.value(
         refreshToken,
@@ -179,34 +169,13 @@ class OAuthClient {
       'client_id': clientId,
     };
 
-    if (scope != null) {
-      if (!isValidScopeString(scope)) {
-        throw ArgumentError.value(
-          scope,
-          'scope',
-          'scope must be a space-delimited list of valid NQCHAR scope tokens.',
-        );
-      }
-      body['scope'] = scope;
-    }
-
-    final response = await httpClient.post(
-      Uri.parse(tokenEndpoint),
-      headers: _buildTokenRequestHeaders(),
-      body: body,
-    );
-
-    return TokenResult.fromResponse(
-      body: response.body,
-      headers: response.headers,
-      statusCode: response.statusCode,
-    );
+    return _sendTokenRequest(body, scope: scope);
   }
 
   /// Requests an access token using the Client Credentials grant (OAuth 2.1 Section 4.2).
   ///
   /// Requires a confidential client configured with a non-empty [clientSecret].
-  Future<TokenResult> exchangeClientCredentials({String? scope}) async {
+  Future<TokenResult> exchangeClientCredentials({String? scope}) {
     if (clientSecret == null || clientSecret!.isEmpty) {
       throw StateError(
         'Client credentials grant requires a confidential client with a non-empty clientSecret.',
@@ -215,6 +184,13 @@ class OAuthClient {
 
     final body = <String, String>{'grant_type': 'client_credentials'};
 
+    return _sendTokenRequest(body, scope: scope);
+  }
+
+  Future<TokenResult> _sendTokenRequest(
+    Map<String, String> body, {
+    String? scope,
+  }) async {
     if (scope != null) {
       if (!isValidScopeString(scope)) {
         throw ArgumentError.value(

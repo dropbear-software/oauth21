@@ -109,17 +109,11 @@ shelf.Response redirectWithAuthorizationCode({
   required String issuer,
   String? state,
 }) {
-  final target = redirectUri.replace(
-    queryParameters: {
-      ...redirectUri.queryParameters,
-      'code': code,
-      if (state != null && state.isNotEmpty) 'state': state,
-      'iss': issuer,
-    },
-  );
-  return shelf.Response.seeOther(
-    target,
-    headers: {'Cache-Control': 'no-store', 'Pragma': 'no-cache'},
+  return _redirectSeeOther(
+    redirectUri: redirectUri,
+    responseParams: {'code': code},
+    issuer: issuer,
+    state: state,
   );
 }
 
@@ -135,12 +129,28 @@ shelf.Response redirectWithAuthorizationError({
   String? errorDescription,
   String? state,
 }) {
-  final target = redirectUri.replace(
-    queryParameters: {
-      ...redirectUri.queryParameters,
+  return _redirectSeeOther(
+    redirectUri: redirectUri,
+    responseParams: {
       'error': error,
       if (errorDescription != null && errorDescription.isNotEmpty)
         'error_description': errorDescription,
+    },
+    issuer: issuer,
+    state: state,
+  );
+}
+
+shelf.Response _redirectSeeOther({
+  required Uri redirectUri,
+  required Map<String, String> responseParams,
+  required String issuer,
+  String? state,
+}) {
+  final target = redirectUri.replace(
+    queryParameters: {
+      ...redirectUri.queryParameters,
+      ...responseParams,
       if (state != null && state.isNotEmpty) 'state': state,
       'iss': issuer,
     },

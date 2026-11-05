@@ -112,6 +112,27 @@ class BearerTokenValidator {
     };
   }
 
+  BearerValidationResult _bearerError({
+    required int statusCode,
+    required String errorCode,
+    required String errorDescription,
+    String? scope,
+  }) {
+    return BearerValidationResult.invalid(
+      statusCode: statusCode,
+      errorCode: errorCode,
+      errorDescription: errorDescription,
+      headers: _errorHeaders(
+        wwwAuthenticate: _buildWwwAuthenticate(
+          errorCode: errorCode,
+          errorDescription: errorDescription,
+          scope: scope,
+        ),
+        hasBody: true,
+      ),
+    );
+  }
+
   /// Validates an incoming resource request's `Authorization` header(s) and
   /// scope requirements.
   ///
@@ -157,20 +178,10 @@ class BearerTokenValidator {
 
     // 2. Reject multiple Authorization headers (OAuth 2.1 Section 5.2 / 5.3.2)
     if (authorizationHeaders != null && authorizationHeaders.length > 1) {
-      const errorCode = 'invalid_request';
-      const errorDescription =
-          'Multiple Authorization headers are not allowed.';
-      return BearerValidationResult.invalid(
+      return _bearerError(
         statusCode: 400,
-        errorCode: errorCode,
-        errorDescription: errorDescription,
-        headers: _errorHeaders(
-          wwwAuthenticate: _buildWwwAuthenticate(
-            errorCode: errorCode,
-            errorDescription: errorDescription,
-          ),
-          hasBody: true,
-        ),
+        errorCode: 'invalid_request',
+        errorDescription: 'Multiple Authorization headers are not allowed.',
       );
     }
 
@@ -195,19 +206,10 @@ class BearerTokenValidator {
     // 4. Extract raw token and enforce token68 ABNF (Section 5.1.1)
     final rawToken = effectiveHeader.trim().substring(6).trim();
     if (rawToken.isEmpty || !token68Regex.hasMatch(rawToken)) {
-      const errorCode = 'invalid_token';
-      const errorDescription = 'Malformed bearer token.';
-      return BearerValidationResult.invalid(
+      return _bearerError(
         statusCode: 401,
-        errorCode: errorCode,
-        errorDescription: errorDescription,
-        headers: _errorHeaders(
-          wwwAuthenticate: _buildWwwAuthenticate(
-            errorCode: errorCode,
-            errorDescription: errorDescription,
-          ),
-          hasBody: true,
-        ),
+        errorCode: 'invalid_token',
+        errorDescription: 'Malformed bearer token.',
       );
     }
 
@@ -215,20 +217,10 @@ class BearerTokenValidator {
     final tokenHash = cryptoService.hashString(rawToken);
     final accessToken = await tokenRepository.findAccessTokenByHash(tokenHash);
     if (accessToken == null || !accessToken.isValid) {
-      const errorCode = 'invalid_token';
-      const errorDescription =
-          'The access token is invalid, expired, or revoked.';
-      return BearerValidationResult.invalid(
+      return _bearerError(
         statusCode: 401,
-        errorCode: errorCode,
-        errorDescription: errorDescription,
-        headers: _errorHeaders(
-          wwwAuthenticate: _buildWwwAuthenticate(
-            errorCode: errorCode,
-            errorDescription: errorDescription,
-          ),
-          hasBody: true,
-        ),
+        errorCode: 'invalid_token',
+        errorDescription: 'The access token is invalid, expired, or revoked.',
       );
     }
 
@@ -240,21 +232,12 @@ class BearerTokenValidator {
           : accessToken.scope!.trim().split(RegExp(r'\s+')).toSet();
 
       if (!grantedScopes.containsAll(requiredScopes)) {
-        const errorCode = 'insufficient_scope';
-        const errorDescription =
-            'The request requires higher privileges than provided by the access token.';
-        return BearerValidationResult.invalid(
+        return _bearerError(
           statusCode: 403,
-          errorCode: errorCode,
-          errorDescription: errorDescription,
-          headers: _errorHeaders(
-            wwwAuthenticate: _buildWwwAuthenticate(
-              errorCode: errorCode,
-              errorDescription: errorDescription,
-              scope: requiredScopes.join(' '),
-            ),
-            hasBody: true,
-          ),
+          errorCode: 'insufficient_scope',
+          errorDescription:
+              'The request requires higher privileges than provided by the access token.',
+          scope: requiredScopes.join(' '),
         );
       }
     }
