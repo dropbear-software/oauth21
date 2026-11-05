@@ -20,8 +20,9 @@ class AuthRequest {
   /// The client identifier.
   final String clientId;
 
-  /// The client's redirection URI.
-  final Uri redirectUri;
+  /// The client's optional redirection URI (may be omitted when the client has
+  /// a single registered redirect URI per OAuth 2.1 Section 2.3.2).
+  final Uri? redirectUri;
 
   /// The optional state parameter used to prevent CSRF.
   final String? state;
@@ -38,21 +39,24 @@ class AuthRequest {
   /// Creates and validates an [AuthRequest].
   ///
   /// Throws [ArgumentError] if:
-  /// - The [redirectUri] has a fragment component (`#`).
+  /// - The [redirectUri] is provided and violates the OAuth 2.1 redirect URI
+  ///   security policy (e.g. has a fragment component `#`).
+  /// - [clientId], [state], [scope], or [customParameters] violate Appendix A
+  ///   ABNF syntax.
   /// - There are duplicate parameter keys or collisions between standard
   ///   parameters, existing parameters in the [authorizationEndpoint], and
   ///   [customParameters].
   AuthRequest({
     required this.authorizationEndpoint,
     required this.clientId,
-    required this.redirectUri,
     required this.codeChallenge,
+    this.redirectUri,
     this.state,
     this.scope,
     this.customParameters = const {},
   }) {
     // 1. Validate redirect URI against OAuth 2.1 redirect URI security policy
-    if (!isAllowedRedirectUri(redirectUri)) {
+    if (redirectUri != null && !isAllowedRedirectUri(redirectUri!)) {
       throw ArgumentError.value(
         redirectUri,
         'redirectUri',
@@ -75,26 +79,30 @@ class AuthRequest {
     }
 
     // 3. Enforce scope ABNF syntax: 1*( %x21 / %x23-5B / %x5D-7E )
-    if (scope != null && scope!.trim().isNotEmpty) {
-      if (!isValidScopeString(scope!)) {
-        throw ArgumentError(
-          'Malformed scope: scope tokens must be non-empty and only contain '
-          'characters in ranges %x21, %x23-5B, and %x5D-7E.',
-        );
-      }
-    }
-
-    // 4. Enforce VSCHAR syntax on client_id and state (ABNF range %x20-7E)
-    if (!vscharOptionalRegex.hasMatch(clientId)) {
-      throw ArgumentError(
-        'client_id contains invalid characters. Must contain only printable '
-        'ASCII characters (VSCHAR).',
+    if (scope != null && !isValidScopeString(scope!)) {
+      throw ArgumentError.value(
+        scope,
+        'scope',
+        'Malformed scope: scope tokens must be non-empty and only contain '
+            'characters in ranges %x21, %x23-5B, and %x5D-7E.',
       );
     }
-    if (state != null && !vscharRequiredRegex.hasMatch(state!)) {
-      throw ArgumentError(
-        'state contains invalid characters or is empty. Must contain only '
-        'printable ASCII characters (VSCHAR).',
+
+    // 4. Enforce 1*VSCHAR syntax on client_id and state (ABNF range %x20-7E)
+    if (!isValidVscharParam(clientId)) {
+      throw ArgumentError.value(
+        clientId,
+        'clientId',
+        'client_id must be non-empty, trimmed, and contain only printable '
+            'ASCII characters (VSCHAR).',
+      );
+    }
+    if (state != null && !isValidVscharParam(state!)) {
+      throw ArgumentError.value(
+        state,
+        'state',
+        'state must be non-empty, trimmed, and contain only printable '
+            'ASCII characters (VSCHAR).',
       );
     }
 
@@ -114,7 +122,7 @@ class AuthRequest {
     // Track all keys seen to check for duplicate keys / parameter pollution
     final allKeys = <String>{};
 
-    // 2. Analyze existing endpoint parameters
+    // 5. Analyze existing endpoint parameters
     endpointUri.queryParametersAll.forEach((key, values) {
       if (values.length > 1) {
         throw ArgumentError(
@@ -132,23 +140,36 @@ class AuthRequest {
       allKeys.add(key);
     });
 
-    // 3. Analyze standard parameters to be added
+    // 6. Analyze standard parameters to be added
     final standardKeysToAdd = [
       'response_type',
       'client_id',
-      'redirect_uri',
-      if (state != null && state!.isNotEmpty) 'state',
+      if (redirectUri != null) 'redirect_uri',
+      if (state != null) 'state',
       'code_challenge',
       'code_challenge_method',
-      if (scope != null && scope!.isNotEmpty) 'scope',
+      if (scope != null) 'scope',
     ];
 
-    for (final key in standardKeysToAdd) {
-      allKeys.add(key);
-    }
+    allKeys.addAll(standardKeysToAdd);
 
-    // 4. Analyze custom parameters
+    // 7. Analyze custom parameters (Appendix A.16 param-name & 1*VSCHAR)
     customParameters.forEach((key, value) {
+      if (!paramNameAbnfRegex.hasMatch(key)) {
+        throw ArgumentError.value(
+          key,
+          'customParameters',
+          'Custom parameter key "$key" violates Appendix A.16 param-name ABNF.',
+        );
+      }
+      if (!isValidVscharParam(value)) {
+        throw ArgumentError.value(
+          value,
+          'customParameters[$key]',
+          'Custom parameter value for "$key" must be a non-empty, trimmed '
+              'VSCHAR string.',
+        );
+      }
       if (standardKeys.contains(key)) {
         throw ArgumentError(
           'Custom parameter "$key" collides with a standard OAuth 2.1 '
@@ -174,25 +195,23 @@ class AuthRequest {
     // Add standard parameters
     queryParams['response_type'] = 'code';
     queryParams['client_id'] = clientId;
-    queryParams['redirect_uri'] = redirectUri.toString();
-    if (state != null && state!.isNotEmpty) {
+    if (redirectUri != null) {
+      queryParams['redirect_uri'] = redirectUri.toString();
+    }
+    if (state != null) {
       queryParams['state'] = state!;
     }
     queryParams['code_challenge'] = codeChallenge.value;
     queryParams['code_challenge_method'] = codeChallenge.method;
 
-    if (scope != null && scope!.isNotEmpty) {
+    if (scope != null) {
       queryParams['scope'] = scope!;
     }
 
     // Add custom parameters
     queryParams.addAll(customParameters);
 
-    // Omit parameters that do not have a value (empty or whitespace-only)
-    queryParams.removeWhere((key, value) => value.trim().isEmpty);
-
-    // Serialize query parameters manually to guarantee order/format,
-    // and perform one last sanity check for duplicates.
+    // Serialize query parameters manually to guarantee order/format.
     final queryBuffer = StringBuffer();
 
     queryParams.forEach((key, value) {

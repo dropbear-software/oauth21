@@ -11,6 +11,22 @@ import 'redirect_uri_policy.dart';
 import 'value_objects/code_challenge.dart';
 import 'value_objects/code_verifier.dart';
 
+/// Client authentication method used by a confidential [OAuthClient] when
+/// authenticating to the authorization server's token endpoint (OAuth 2.1
+/// Section 2.4.1).
+enum ClientAuthMethod {
+  /// Sends `client_id` and `client_secret` in the form-encoded POST body
+  /// (`client_secret_post`). Mandatory to implement for OAuth 2.1 authorization
+  /// servers (Section 2.4.1).
+  clientSecretPost,
+
+  /// Sends credentials via the `Authorization: Basic` HTTP header using
+  /// `application/x-www-form-urlencoded` encoding inside Base64
+  /// (`client_secret_basic`), omitting `client_id` and `client_secret` from the
+  /// POST body.
+  clientSecretBasic,
+}
+
 /// Orchestrates the front-channel and back-channel OAuth 2.1 client flow.
 class OAuthClient {
   /// The authorization server's authorization endpoint.
@@ -25,6 +41,12 @@ class OAuthClient {
   /// The client's secret, if using client authentication (optional).
   final String? clientSecret;
 
+  /// The client authentication method used when [clientSecret] is non-null.
+  ///
+  /// Defaults to [ClientAuthMethod.clientSecretPost] (the mandatory-to-support
+  /// method in OAuth 2.1 Section 2.4.1).
+  final ClientAuthMethod authMethod;
+
   /// The HTTP client port used to communicate with the authorization server.
   final OAuthHttpClient httpClient;
 
@@ -36,21 +58,72 @@ class OAuthClient {
   final String? expectedIssuer;
 
   /// Creates a new [OAuthClient] instance.
-  const OAuthClient({
+  ///
+  /// Throws [ArgumentError] if [clientId], [clientSecret],
+  /// [authorizationEndpoint], [tokenEndpoint], or [expectedIssuer] violate
+  /// OAuth 2.1 ABNF or URI security policies.
+  OAuthClient({
     required this.authorizationEndpoint,
     required this.tokenEndpoint,
     required this.clientId,
     required this.httpClient,
     this.requestParser = const DefaultRequestParser(),
     this.clientSecret,
+    this.authMethod = ClientAuthMethod.clientSecretPost,
     this.expectedIssuer,
-  });
+  }) {
+    if (!isValidVscharParam(clientId)) {
+      throw ArgumentError.value(
+        clientId,
+        'clientId',
+        'clientId must be a non-empty, trimmed VSCHAR string.',
+      );
+    }
+    if (clientSecret != null && !isValidVscharParam(clientSecret!)) {
+      throw ArgumentError.value(
+        clientSecret,
+        'clientSecret',
+        'clientSecret must be a non-empty, trimmed VSCHAR string.',
+      );
+    }
+    final authUri = Uri.tryParse(authorizationEndpoint);
+    if (!isValidVscharParam(authorizationEndpoint) ||
+        authUri == null ||
+        !isAllowedHttpEndpointUri(authUri)) {
+      throw ArgumentError.value(
+        authorizationEndpoint,
+        'authorizationEndpoint',
+        'authorizationEndpoint must be a valid https (or loopback http) URI '
+            'with a host and no fragment or userinfo.',
+      );
+    }
+    final tokenUri = Uri.tryParse(tokenEndpoint);
+    if (!isValidVscharParam(tokenEndpoint) ||
+        tokenUri == null ||
+        !isAllowedHttpEndpointUri(tokenUri)) {
+      throw ArgumentError.value(
+        tokenEndpoint,
+        'tokenEndpoint',
+        'tokenEndpoint must be a valid https (or loopback http) URI with a '
+            'host and no fragment or userinfo.',
+      );
+    }
+    if (expectedIssuer != null &&
+        !isValidIssuerUri(expectedIssuer!, allowLoopbackHttp: true)) {
+      throw ArgumentError.value(
+        expectedIssuer,
+        'expectedIssuer',
+        'expectedIssuer must be a valid https (or loopback http) issuer URL '
+            'with no query or fragment components.',
+      );
+    }
+  }
 
   /// Composes a secure front-channel [AuthRequest] for the authorization code
   /// grant.
   AuthRequest createAuthorizationRequest({
-    required Uri redirectUri,
     required CodeChallenge codeChallenge,
+    Uri? redirectUri,
     String? state,
     String? scope,
     Map<String, String> customParameters = const {},
@@ -119,7 +192,8 @@ class OAuthClient {
 
   Map<String, String> _buildTokenRequestHeaders() {
     final headers = <String, String>{};
-    if (clientSecret != null) {
+    if (clientSecret != null &&
+        authMethod == ClientAuthMethod.clientSecretBasic) {
       final encodedClientId = Uri.encodeQueryComponent(clientId);
       final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
       final credentials = base64.encode(
@@ -128,6 +202,16 @@ class OAuthClient {
       headers['Authorization'] = 'Basic $credentials';
     }
     return headers;
+  }
+
+  Map<String, String> _withClientAuthBody(Map<String, String> params) {
+    if (clientSecret == null) {
+      return {...params, 'client_id': clientId};
+    }
+    if (authMethod == ClientAuthMethod.clientSecretPost) {
+      return {...params, 'client_id': clientId, 'client_secret': clientSecret!};
+    }
+    return params;
   }
 
   /// Exchanges the authorization [code] for access tokens via back-channel
@@ -139,16 +223,12 @@ class OAuthClient {
     required CodeVerifier codeVerifier,
     Uri? redirectUri,
   }) {
-    final body = {
+    final body = _withClientAuthBody({
       'grant_type': 'authorization_code',
       'code': code,
       'code_verifier': codeVerifier.value,
-      'client_id': clientId,
-    };
-
-    if (redirectUri != null) {
-      body['redirect_uri'] = redirectUri.toString();
-    }
+      if (redirectUri != null) 'redirect_uri': redirectUri.toString(),
+    });
 
     return _sendTokenRequest(body);
   }
@@ -168,11 +248,10 @@ class OAuthClient {
       );
     }
 
-    final body = {
+    final body = _withClientAuthBody({
       'grant_type': 'refresh_token',
       'refresh_token': refreshToken,
-      'client_id': clientId,
-    };
+    });
 
     return _sendTokenRequest(body, scope: scope);
   }
@@ -182,14 +261,14 @@ class OAuthClient {
   ///
   /// Requires a confidential client configured with a non-empty [clientSecret].
   Future<TokenResult> exchangeClientCredentials({String? scope}) {
-    if (clientSecret == null || clientSecret!.isEmpty) {
+    if (clientSecret == null) {
       throw StateError(
         'Client credentials grant requires a confidential client with a '
         'non-empty clientSecret.',
       );
     }
 
-    final body = <String, String>{'grant_type': 'client_credentials'};
+    final body = _withClientAuthBody({'grant_type': 'client_credentials'});
 
     return _sendTokenRequest(body, scope: scope);
   }

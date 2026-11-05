@@ -36,6 +36,68 @@ void main() {
     const clientId = 'client-123';
     const stateToken = 'state-xyz';
 
+    group('constructor validation', () {
+      final dummyHttp = MockOAuthHttpClient(
+        (u, h, b) async =>
+            const OAuthHttpResponse(statusCode: 200, body: '', headers: {}),
+      );
+
+      test('should reject invalid clientId, clientSecret, endpoints, or '
+          'expectedIssuer', () {
+        expect(
+          () => OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: '   ',
+            httpClient: dummyHttp,
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            clientSecret: '',
+            httpClient: dummyHttp,
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => OAuthClient(
+            authorizationEndpoint: 'http://auth.example.com/authorize',
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            httpClient: dummyHttp,
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: 'http://auth.example.com/token',
+            clientId: clientId,
+            httpClient: dummyHttp,
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            expectedIssuer: 'https://auth.example.com?query=1',
+            httpClient: dummyHttp,
+          ),
+          throwsArgumentError,
+        );
+      });
+    });
+
     group('createAuthorizationRequest', () {
       test('should build a valid AuthRequest with correct parameters', () {
         final client = OAuthClient(
@@ -67,7 +129,8 @@ void main() {
         expect(request.scope, equals('read write'));
       });
 
-      test('should build a valid AuthRequest when state is omitted (#5)', () {
+      test('should build a valid AuthRequest when state and redirectUri are '
+          'omitted (#5, Section 2.3.2)', () {
         final client = OAuthClient(
           authorizationEndpoint: authEndpoint,
           tokenEndpoint: tokenEndpoint,
@@ -80,12 +143,16 @@ void main() {
         final verifier = CodeVerifier.generate();
         final challenge = CodeChallenge.s256(verifier);
         final request = client.createAuthorizationRequest(
-          redirectUri: Uri.parse('https://client.example.com/callback'),
           codeChallenge: challenge,
         );
 
         expect(request.state, isNull);
+        expect(request.redirectUri, isNull);
         expect(request.toUri().queryParameters.containsKey('state'), isFalse);
+        expect(
+          request.toUri().queryParameters.containsKey('redirect_uri'),
+          isFalse,
+        );
       });
     });
 
@@ -286,13 +353,12 @@ void main() {
         expect(result, isA<TokenSuccess>());
       });
 
-      test('should include Basic authentication header if clientSecret is '
-          'provided', () async {
+      test('should default to client_secret_post when clientSecret is provided '
+          '(Section 2.4.1)', () async {
         final httpClient = MockOAuthHttpClient((url, headers, body) async {
-          expect(
-            headers['Authorization'],
-            equals('Basic Y2xpZW50LTEyMzpzZWNyZXQtNDU2'),
-          );
+          expect(headers.containsKey('Authorization'), isFalse);
+          expect(body['client_id'], equals(clientId));
+          expect(body['client_secret'], equals('secret-456'));
           return const OAuthHttpResponse(
             statusCode: 200,
             body: '{"access_token": "token123", "token_type": "Bearer"}',
@@ -315,6 +381,38 @@ void main() {
         expect(result, isA<TokenSuccess>());
       });
 
+      test('should include Basic authentication header and omit body client_id '
+          'when ClientAuthMethod.clientSecretBasic is configured', () async {
+        final httpClient = MockOAuthHttpClient((url, headers, body) async {
+          expect(
+            headers['Authorization'],
+            equals('Basic Y2xpZW50LTEyMzpzZWNyZXQtNDU2'),
+          );
+          expect(body.containsKey('client_id'), isFalse);
+          expect(body.containsKey('client_secret'), isFalse);
+          return const OAuthHttpResponse(
+            statusCode: 200,
+            body: '{"access_token": "token123", "token_type": "Bearer"}',
+            headers: {'Cache-Control': 'no-store'},
+          );
+        });
+
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: clientId,
+          clientSecret: 'secret-456',
+          authMethod: ClientAuthMethod.clientSecretBasic,
+          httpClient: httpClient,
+        );
+
+        final result = await client.exchangeCode(
+          code: 'auth-code',
+          codeVerifier: codeVerifier,
+        );
+        expect(result, isA<TokenSuccess>());
+      });
+
       test('should strictly form-encode client ID and secret separately before '
           'generating Basic auth token', () async {
         final httpClient = MockOAuthHttpClient((url, headers, body) async {
@@ -325,6 +423,7 @@ void main() {
             headers['Authorization'],
             equals('Basic Y2xpZW50JTNBaWQ6c2VjJTI2cmV0'),
           );
+          expect(body.containsKey('client_id'), isFalse);
           return const OAuthHttpResponse(
             statusCode: 200,
             body: '{"access_token":"t1","token_type":"Bearer"}',
@@ -337,6 +436,7 @@ void main() {
           tokenEndpoint: tokenEndpoint,
           clientId: 'client:id',
           clientSecret: 'sec&ret',
+          authMethod: ClientAuthMethod.clientSecretBasic,
           httpClient: httpClient,
         );
 
@@ -418,12 +518,47 @@ void main() {
       });
 
       test(
-        'exchangeClientCredentials should authenticate via Basic Auth, support '
-        'optional scope, and throw StateError for public clients',
+        'exchangeClientCredentials should authenticate via clientSecretPost by '
+        'default or clientSecretBasic when configured, support optional scope, '
+        'and throw StateError for public clients',
         () async {
-          final httpClient = MockOAuthHttpClient((url, headers, body) async {
+          final postHttpClient = MockOAuthHttpClient((
+            url,
+            headers,
+            body,
+          ) async {
             expect(body['grant_type'], equals('client_credentials'));
+            expect(body['client_id'], equals(clientId));
+            expect(body['client_secret'], equals('secret-456'));
             expect(body['scope'], equals('read write'));
+            expect(headers.containsKey('Authorization'), isFalse);
+            return const OAuthHttpResponse(
+              statusCode: 200,
+              body: '{"access_token": "cc-token", "token_type": "Bearer"}',
+              headers: {'Cache-Control': 'no-store'},
+            );
+          });
+
+          final confidentialPostClient = OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            clientSecret: 'secret-456',
+            httpClient: postHttpClient,
+          );
+
+          final resPost = await confidentialPostClient
+              .exchangeClientCredentials(scope: 'read write');
+          expect(resPost, isA<TokenSuccess>());
+
+          final basicHttpClient = MockOAuthHttpClient((
+            url,
+            headers,
+            body,
+          ) async {
+            expect(body['grant_type'], equals('client_credentials'));
+            expect(body.containsKey('client_id'), isFalse);
+            expect(body.containsKey('client_secret'), isFalse);
             expect(headers['Authorization'], startsWith('Basic '));
             return const OAuthHttpResponse(
               statusCode: 200,
@@ -432,21 +567,21 @@ void main() {
             );
           });
 
-          final confidentialClient = OAuthClient(
+          final confidentialBasicClient = OAuthClient(
             authorizationEndpoint: authEndpoint,
             tokenEndpoint: tokenEndpoint,
             clientId: clientId,
             clientSecret: 'secret-456',
-            httpClient: httpClient,
+            authMethod: ClientAuthMethod.clientSecretBasic,
+            httpClient: basicHttpClient,
           );
 
-          final res = await confidentialClient.exchangeClientCredentials(
-            scope: 'read write',
-          );
-          expect(res, isA<TokenSuccess>());
+          final resBasic = await confidentialBasicClient
+              .exchangeClientCredentials();
+          expect(resBasic, isA<TokenSuccess>());
 
           expect(
-            () => confidentialClient.exchangeClientCredentials(
+            () => confidentialPostClient.exchangeClientCredentials(
               scope: 'invalid"scope',
             ),
             throwsArgumentError,
@@ -456,7 +591,7 @@ void main() {
             authorizationEndpoint: authEndpoint,
             tokenEndpoint: tokenEndpoint,
             clientId: clientId,
-            httpClient: httpClient,
+            httpClient: postHttpClient,
           );
           expect(publicClient.exchangeClientCredentials, throwsStateError);
         },

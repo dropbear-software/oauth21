@@ -1,4 +1,5 @@
 import '../abnf_validators.dart';
+import '../redirect_uri_policy.dart';
 
 /// Represents parsed callback redirect parameters from the authorization
 /// server.
@@ -109,10 +110,10 @@ class DefaultRequestParser implements OAuthRequestParser {
       );
     }
 
-    if (iss != null && !vscharRequiredRegex.hasMatch(iss)) {
+    if (iss != null && !isValidIssuerUri(iss, allowLoopbackHttp: true)) {
       throw FormatException(
-        'Security violation: "iss" parameter contains characters violating '
-        'ABNF VSCHAR syntax.',
+        'Security violation: "iss" parameter must be a valid issuer URL '
+        'with no query or fragment components.',
       );
     }
 

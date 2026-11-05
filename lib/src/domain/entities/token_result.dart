@@ -59,8 +59,6 @@ sealed class TokenResult {
   }
 }
 
-final RegExp _tokenTypeNameRegex = RegExp(r'^[A-Za-z0-9\-._]+$');
-
 TokenError _parseTokenError(Map<String, dynamic> json, int? statusCode) {
   if (statusCode != null && statusCode < 400) {
     throw FormatException(
@@ -135,7 +133,7 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
   // Validate token_type (type-name = 1*name-char where
   // name-char = "-" / "." / "_" / DIGIT / ALPHA, or absolute URI)
   final isAbsoluteUri = Uri.tryParse(tokenType)?.isAbsolute ?? false;
-  if (!_tokenTypeNameRegex.hasMatch(tokenType) && !isAbsoluteUri) {
+  if (!paramNameAbnfRegex.hasMatch(tokenType) && !isAbsoluteUri) {
     throw FormatException(
       'Invalid token_type format in response: "$tokenType". '
       'Must conform to type-name ABNF or be a valid absolute URI.',
@@ -160,8 +158,7 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
   }
 
   final scope = json['scope'];
-  if (scope is! String? ||
-      (scope != null && !isValidScopeString(scope, allowEmpty: true))) {
+  if (scope is! String? || (scope != null && !isValidScopeString(scope))) {
     throw const FormatException(
       'Invalid "scope" parameter in response: must be a String of valid '
       'NQCHAR scope tokens.',
