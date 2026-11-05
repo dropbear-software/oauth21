@@ -430,50 +430,104 @@ void main() {
       });
     });
 
-    group('Omitted parameter handling', () {
+    group('Omitted and invalid parameter handling', () {
       test(
-        'should completely omit parameters with empty values from serialized '
-        'query',
+        'should allow omitting redirectUri when client has a single registered '
+        'redirect URI (Section 2.3.2)',
         () {
           final request = AuthRequest(
             authorizationEndpoint: authEndpoint,
             clientId: clientId,
-            redirectUri: redirectUri,
-            state: stateToken,
             codeChallenge: codeChallenge,
-            scope: '', // empty value
-            customParameters: {
-              'foo': '', // empty custom parameter value
-              'bar': 'baz',
-            },
+            state: stateToken,
+            scope: 'read',
           );
 
+          expect(request.redirectUri, isNull);
           final uri = request.toUri();
-          expect(uri.queryParameters.containsKey('scope'), isFalse);
-          expect(uri.queryParameters.containsKey('foo'), isFalse);
-          expect(uri.queryParameters['bar'], equals('baz'));
-          expect(uri.query, isNot(contains('scope=')));
-          expect(uri.query, isNot(contains('foo=')));
+          expect(uri.queryParameters.containsKey('redirect_uri'), isFalse);
+          expect(uri.queryParameters['client_id'], equals(clientId));
+          expect(uri.queryParameters['state'], equals(stateToken));
+          expect(uri.queryParameters['scope'], equals('read'));
         },
       );
 
-      test(
-        'should completely omit parameters consisting entirely of whitespace',
-        () {
-          final request = AuthRequest(
+      test('should reject empty or untrimmed clientId, state, scope, or custom '
+          'parameters', () {
+        for (final badClientId in ['', '   ', ' client', 'client ']) {
+          expect(
+            () => AuthRequest(
+              authorizationEndpoint: authEndpoint,
+              clientId: badClientId,
+              redirectUri: redirectUri,
+              codeChallenge: codeChallenge,
+            ),
+            throwsArgumentError,
+            reason: 'Expected clientId "$badClientId" to be rejected',
+          );
+        }
+
+        for (final badState in ['', '   ', ' state', 'state ']) {
+          expect(
+            () => AuthRequest(
+              authorizationEndpoint: authEndpoint,
+              clientId: clientId,
+              redirectUri: redirectUri,
+              state: badState,
+              codeChallenge: codeChallenge,
+            ),
+            throwsArgumentError,
+            reason: 'Expected state "$badState" to be rejected',
+          );
+        }
+
+        for (final badScope in ['', '   ']) {
+          expect(
+            () => AuthRequest(
+              authorizationEndpoint: authEndpoint,
+              clientId: clientId,
+              redirectUri: redirectUri,
+              scope: badScope,
+              codeChallenge: codeChallenge,
+            ),
+            throwsArgumentError,
+            reason: 'Expected scope "$badScope" to be rejected',
+          );
+        }
+
+        expect(
+          () => AuthRequest(
             authorizationEndpoint: authEndpoint,
             clientId: clientId,
             redirectUri: redirectUri,
-            state: stateToken,
             codeChallenge: codeChallenge,
-            scope: '   ', // Pure whitespace
-          );
+            customParameters: {'bad key!': 'val'},
+          ),
+          throwsArgumentError,
+        );
 
-          final uri = request.toUri();
-          expect(uri.queryParameters.containsKey('scope'), isFalse);
-          expect(uri.query, isNot(contains('scope=')));
-        },
-      );
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: redirectUri,
+            codeChallenge: codeChallenge,
+            customParameters: {'valid_key': ''},
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => AuthRequest(
+            authorizationEndpoint: authEndpoint,
+            clientId: clientId,
+            redirectUri: redirectUri,
+            codeChallenge: codeChallenge,
+            customParameters: {'valid_key': ' untrimmed '},
+          ),
+          throwsArgumentError,
+        );
+      });
     });
 
     group('Scope syntax character enforcement', () {

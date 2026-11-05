@@ -3,7 +3,10 @@ abstract interface class CryptoService {
   /// Generates a cryptographically secure, URL-safe random string containing
   /// the specified number of bits of entropy (defaults to 256).
   ///
-  /// The resulting string must have a guessing probability <= 2^-128.
+  /// Per OAuth 2.1 Section 7.7, the probability of an attacker guessing a
+  /// generated token or authorization code MUST be `<= 2^(-128)` (>= 128 bits
+  /// of entropy) and SHOULD be `<= 2^(-160)` (>= 160 bits of entropy, satisfied
+  /// by the 256-bit default).
   String generateRandomEntropyString([int bits = 256]);
 
   /// Computes the SHA-256 hash of the input string, returning its hex

@@ -103,6 +103,10 @@ final class AuthorizeDirectError extends AuthorizeValidationResult {
 
 /// Service that validates incoming parameters at the authorization endpoint.
 class AuthorizeRequestValidator {
+  static final RegExp _loopbackHttpRawRegex = RegExp(
+    r'^http://(\[::1\]|127\.0\.0\.1|localhost)(?::([0-9]+))?(/.*|\?.*|$)',
+  );
+
   /// The repository used to look up client registrations.
   final ClientRepository clientRepository;
 
@@ -464,11 +468,8 @@ class AuthorizeRequestValidator {
           registeredUri.toString() == requestedUri.toString()) {
         return true;
       }
-      if (registeredUri.scheme.toLowerCase() == 'http' &&
-          isLoopbackHost(registeredUri.host) &&
-          requestedUri.scheme.toLowerCase() == 'http' &&
-          isLoopbackHost(requestedUri.host)) {
-        if (_matchLoopback(registeredUri, requestedUri)) {
+      if (isLoopbackHttpUri(registeredUri) && isLoopbackHttpUri(requestedUri)) {
+        if (_matchLoopback(registeredUri, rawRequestedUri)) {
           return true;
         }
       }
@@ -476,11 +477,26 @@ class AuthorizeRequestValidator {
     return false;
   }
 
-  bool _matchLoopback(Uri registered, Uri requested) {
-    return registered.scheme.toLowerCase() == 'http' &&
-        requested.scheme.toLowerCase() == 'http' &&
-        registered.host.toLowerCase() == requested.host.toLowerCase() &&
-        registered.path == requested.path &&
-        registered.query == requested.query;
+  bool _matchLoopback(Uri registered, String requestedRaw) {
+    final regMatch = _loopbackHttpRawRegex.firstMatch(registered.toString());
+    final reqMatch = _loopbackHttpRawRegex.firstMatch(requestedRaw);
+    if (regMatch == null || reqMatch == null) {
+      return false;
+    }
+
+    final reqPortStr = reqMatch.group(2);
+    if (reqPortStr != null) {
+      final portNum = int.tryParse(reqPortStr);
+      if (portNum == null ||
+          reqPortStr != portNum.toString() ||
+          portNum < 1 ||
+          portNum > 65535) {
+        return false;
+      }
+    }
+
+    final regStripped = 'http://${regMatch.group(1)}${regMatch.group(3)}';
+    final reqStripped = 'http://${reqMatch.group(1)}${reqMatch.group(3)}';
+    return regStripped == reqStripped;
   }
 }

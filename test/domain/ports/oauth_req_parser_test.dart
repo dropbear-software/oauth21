@@ -168,16 +168,25 @@ void main() {
         },
       );
 
-      test('should reject redirect URI if iss contains non-VSCHAR characters '
-          '(#13)', () {
-        final malformedIssUri = Uri.parse(
-          'https://client.example.com/callback?code=splat-code'
-          '&iss=https://auth.example.com\nbreak',
-        );
-        expect(
-          () => parser.parseRedirect(malformedIssUri),
-          throwsFormatException,
-        );
+      test('should reject redirect URI if iss violates issuer URL syntax '
+          '(Sections 4.1.2 & 7.15.1, #13)', () {
+        for (final badIss in [
+          'https://auth.example.com\nbreak',
+          'not-a-uri',
+          'http://auth.example.com',
+          'https://auth.example.com?foo=bar',
+          'https://auth.example.com#frag',
+        ]) {
+          final malformedIssUri = Uri.parse(
+            'https://client.example.com/callback?code=splat-code'
+            '&iss=${Uri.encodeQueryComponent(badIss)}',
+          );
+          expect(
+            () => parser.parseRedirect(malformedIssUri),
+            throwsFormatException,
+            reason: 'Expected iss "$badIss" to throw FormatException',
+          );
+        }
       });
 
       test(

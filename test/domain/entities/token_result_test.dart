@@ -115,6 +115,8 @@ void main() {
           '{"access_token":"token-123","token_type":"Bearer",'
               '"scope":["read"]}',
           '{"access_token":"token-123","token_type":"Bearer",'
+              '"scope":""}',
+          '{"access_token":"token-123","token_type":"Bearer",'
               '"scope":"read  write"}',
           '{"access_token":"token-123","token_type":"Bearer",'
               r'"scope":"read\"quote"}',

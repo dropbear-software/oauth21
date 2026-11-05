@@ -156,17 +156,13 @@ void main() {
         const parser = DefaultRequestParser();
         final parsedParams = parser.parseRedirect(callbackUri);
 
-        // 4. Initialize OAuthClient
+        // 4. Initialize OAuthClient (defaults to clientSecretPost)
         final mockHttpClient = HttpAdapter(
           MockClient((request) async {
             // Verify back-channel request properties
             expect(request.url.toString(), equals(tokenEndpoint));
             expect(request.method, equals('POST'));
-            // Basic auth should be sent
-            expect(
-              request.headers['Authorization'],
-              equals('Basic bXktY2xpZW50LWlkOm15LWNsaWVudC1zZWNyZXQ='),
-            );
+            expect(request.headers.containsKey('Authorization'), isFalse);
             expect(
               request.headers['Content-Type'],
               equals('application/x-www-form-urlencoded'),
@@ -178,6 +174,7 @@ void main() {
             expect(bodyParams['code'], equals(authCode));
             expect(bodyParams['code_verifier'], equals(verifier.value));
             expect(bodyParams['client_id'], equals(clientId));
+            expect(bodyParams['client_secret'], equals(clientSecret));
             // Redirect URI must be present in token request if bound to
             // authorization code
             expect(bodyParams['redirect_uri'], equals(redirectUri));
@@ -254,7 +251,8 @@ void main() {
       },
     );
 
-    test('exchanges refresh token for new access token', () async {
+    test('exchanges refresh token for new access token using '
+        'ClientAuthMethod.clientSecretBasic', () async {
       final mockHttpClient = HttpAdapter(
         MockClient((request) async {
           expect(request.url.toString(), equals(tokenEndpoint));
@@ -267,7 +265,7 @@ void main() {
           final bodyParams = request.bodyFields;
           expect(bodyParams['grant_type'], equals('refresh_token'));
           expect(bodyParams['refresh_token'], equals('old-refresh-token-123'));
-          expect(bodyParams['client_id'], equals(clientId));
+          expect(bodyParams.containsKey('client_id'), isFalse);
 
           return http.Response(
             '{"access_token": "new-access-token", "token_type": "Bearer", '
@@ -283,6 +281,7 @@ void main() {
         tokenEndpoint: tokenEndpoint,
         clientId: clientId,
         clientSecret: clientSecret,
+        authMethod: ClientAuthMethod.clientSecretBasic,
         httpClient: mockHttpClient,
       );
 

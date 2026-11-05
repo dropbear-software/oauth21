@@ -1,5 +1,7 @@
 import 'package:meta/meta.dart';
 
+import '../abnf_validators.dart';
+
 /// Domain entity representing an issued authorization code.
 @immutable
 class AuthCode {
@@ -42,22 +44,35 @@ class AuthCode {
     this.scope,
     this.isUsed = false,
   }) {
-    final vscharRequiredRegex = RegExp(r'^[\x20-\x7E]+$');
-    if (code.isEmpty ||
-        code.trim() != code ||
-        !vscharRequiredRegex.hasMatch(code)) {
+    if (!isValidVscharParam(code)) {
       throw ArgumentError(
         'code must not be empty, must be thoroughly trimmed, and '
         'must contain only printable ASCII characters (VSCHAR).',
       );
     }
 
-    if (clientId.isEmpty ||
-        clientId.trim() != clientId ||
-        !vscharRequiredRegex.hasMatch(clientId)) {
+    if (!isValidVscharParam(clientId)) {
       throw ArgumentError(
         'clientId must not be empty, must be thoroughly trimmed, and '
         'must contain only printable ASCII characters (VSCHAR).',
+      );
+    }
+
+    if (!isValidVscharParam(userId)) {
+      throw ArgumentError.value(
+        userId,
+        'userId',
+        'userId must not be empty, must be thoroughly trimmed, and '
+            'must contain only printable ASCII characters (VSCHAR).',
+      );
+    }
+
+    if (!codeVerifierAbnfRegex.hasMatch(codeChallenge)) {
+      throw ArgumentError.value(
+        codeChallenge,
+        'codeChallenge',
+        'codeChallenge must be 43..128 unreserved characters '
+            '(Appendix A.18).',
       );
     }
 
@@ -66,6 +81,15 @@ class AuthCode {
         codeChallengeMethod,
         'codeChallengeMethod',
         'codeChallengeMethod must be "S256".',
+      );
+    }
+
+    if (scope != null && !isValidScopeString(scope!)) {
+      throw ArgumentError.value(
+        scope,
+        'scope',
+        'scope must be a space-delimited list of non-empty NQCHAR tokens '
+            '(Appendix A.4).',
       );
     }
   }

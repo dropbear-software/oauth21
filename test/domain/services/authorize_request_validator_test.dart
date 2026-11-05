@@ -523,29 +523,55 @@ void main() {
       },
     );
 
-    test('should successfully validate localhost loopback regardless of '
-        'case variation', () async {
-      final upperCaseLocalhostParams = createParams(
-        redirectUri: 'http://LOCALHOST:9999/cb',
-      );
-      final mixedCaseLocalhostParams = createParams(
-        redirectUri: 'http://LocalHost:9999/cb',
-      );
+    test(
+      'should enforce strict raw string comparison on loopback redirect_uri '
+      'outside valid ephemeral ports (Section 4.1.1 / Section 8.4.2)',
+      () async {
+        for (final validLoopback in [
+          'http://127.0.0.1:54321/cb',
+          'http://127.0.0.1/cb',
+          'http://[::1]:65535/cb',
+          'http://localhost:9999/cb',
+        ]) {
+          final result = await validator.validate(
+            createParams(redirectUri: validLoopback),
+          );
+          expect(result, isA<AuthorizeRequestValid>(), reason: validLoopback);
+        }
 
-      final upperResult = await validator.validate(upperCaseLocalhostParams);
-      final mixedResult = await validator.validate(mixedCaseLocalhostParams);
+        // Registered URI without explicit port matched against requested URI
+        // with ephemeral port
+        final portlessLoopbackClient = ClientRegistration(
+          clientId: 'client-loopback-portless',
+          clientType: ClientType.public,
+          redirectUris: {Uri.parse('http://127.0.0.1/cb')},
+          allowedScopes: {'read'},
+        );
+        clientRepo.addClient(portlessLoopbackClient);
+        final portlessRes = await validator.validate(
+          createParams(
+            clientId: 'client-loopback-portless',
+            redirectUri: 'http://127.0.0.1:51234/cb',
+          ),
+        );
+        expect(portlessRes, isA<AuthorizeRequestValid>());
 
-      expect(upperResult, isA<AuthorizeRequestValid>());
-      expect(
-        (upperResult as AuthorizeRequestValid).validatedRedirectUri,
-        equals(Uri.parse('http://LOCALHOST:9999/cb')),
-      );
-
-      expect(mixedResult, isA<AuthorizeRequestValid>());
-      expect(
-        (mixedResult as AuthorizeRequestValid).validatedRedirectUri,
-        equals(Uri.parse('http://LocalHost:9999/cb')),
-      );
-    });
+        for (final invalidLoopback in [
+          'http://LOCALHOST:9999/cb',
+          'http://LocalHost:9999/cb',
+          'HTTP://127.0.0.1:9999/cb',
+          'http://127.0.0.1:9999/%63b',
+          'http://127.0.0.1:08080/cb',
+          'http://127.0.0.1:0/cb',
+          'http://127.0.0.1:65536/cb',
+          'http://127.0.0.1:/cb',
+        ]) {
+          final result = await validator.validate(
+            createParams(redirectUri: invalidLoopback),
+          );
+          expect(result, isA<AuthorizeDirectError>(), reason: invalidLoopback);
+        }
+      },
+    );
   });
 }
