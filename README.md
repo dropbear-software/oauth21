@@ -1,509 +1,464 @@
-# OAuth 2.1 for Dart
+A pure, platform-agnostic Dart implementation of the **OAuth 2.1 Authorization
+Framework** (`draft-ietf-oauth-v2-1-17`, replacing and obsoleting RFC 6749 and
+RFC 6750 while consolidating RFC 7636, RFC 8252, RFC 9700, and RFC 10017).
 
-A pure, platform-agnostic Dart library implementing the **OAuth 2.1
-Authorization Framework** (obsoleting RFC 6749 and RFC 6750). Designed with
-**Clean Architecture** principles, this package provides robust,
-compliance-hardened components for building both **OAuth 2.1 Clients** and
-**OAuth 2.1 Authorization Servers**.
+Build spec-conformant **OAuth 2.1 Clients**, **Authorization Servers**, and
+**Resource Servers** with mandatory S256 PKCE, refresh token rotation, issuer
+mix-up defense (`iss`), and strict ABNF/URI validation—without `dart:io` or
+Flutter runtime locks.
 
-This package contains zero platform-specific dependencies (no `dart:io` or
-Flutter locks) and has a minimal supply chain, depending only on the native Dart
-SDK, `package:http`, `package:crypto`, `package:meta`, and `package:shelf` (for
-server adapters).
+| Entrypoint | Purpose |
+| :--- | :--- |
+| `package:oauth21/client.dart` | Client flows, PKCE (`CodeVerifier`, `CodeChallenge`), `OAuthClient`, and `OAuthAuthenticatedClient`. |
+| `package:oauth21/server.dart` | Authorization Server (`AuthorizeRequestValidator`, `TokenRequestHandler`), Resource Server (`BearerTokenValidator`), and `package:shelf` adapters. |
+| `package:oauth21/oauth21.dart` | Umbrella library exporting both client and server APIs. |
 
----
+## Contents
 
-## 🏆 Key Security & Compliance Guarantees
-
-This library implements strict, defensive validations to guarantee compile-time
-and runtime security matching the OAuth 2.1 specification:
-
-*   🔒 **Mandatory PKCE (S256 Exclusively)**: Plain PKCE is completely removed
-    across client and server flows (`CodeChallenge.s256`, `AuthCode`,
-    `AuthorizeRequestValidator`, and `TokenRequestHandler`) to enforce
-    cryptographic SHA-256 code challenge verification in constant time.
-*   🛡️ **TLS & Redirection Scheme Rules**: Enforces `https` for redirect
-    URIs, token endpoints, and authenticated resource calls, with
-    `request.followRedirects = false` enforced on `OAuthAuthenticatedClient`.
-    Cleartext HTTP is allowed exclusively on local loopback interfaces
-    (`127.0.0.1`, `[::1]`, `::1`, or `localhost`). Native application
-    private-use schemes are permitted *only* when they follow reverse-domain dot
-    notation (e.g. `com.example.app:/callback`), blocking dangerous schemes
-    (`javascript:`, `data:`, `file:`).
-*   📊 **Parameter Pollution Interception**: Fully generalizable check that
-    throws an error (client) or rejects with `invalid_request` (server) if *any*
-    parameter key (such as `code`, `state`, `client_id`, or `redirect_uri`) is
-    duplicated in query parameters or POST bodies.
-*   🧼 **ABNF Syntax Character Filters**: Protects application log components
-    and downstream storage from parameter injection attacks by validating
-    parameter values against strict ABNF ranges:
-    *   `state` and `code` must contain only printable ASCII `VSCHAR` characters
-        (`%x20-7E`).
-    *   `error` and `error_description` must contain only `NQSCHAR` characters
-        (`%x20-21 / %x23-5B / %x5D-7E`), explicitly banning control characters,
-        raw newlines, carriage returns, unescaped double quotes, and
-        backslashes.
-*   🚫 **Deep Token Leakage Prevention**: Under no circumstances may an access
-    token be appended to a query parameter string. The
-    `OAuthAuthenticatedClient` wrapper performs a deep scan of the request URI
-    and rejects request execution if the access token value is detected inside
-    *any* query parameter value, preventing accidental URL channel leakages.
-*   💾 **Cache-Control Enforcements**: Rejects client token response payloads
-    that lack the `Cache-Control: no-store` header to prevent credentials from
-    being persisted to disk. The server-side token handler ensures all token
-    endpoint responses strictly return `Cache-Control: no-store` and
-    `Pragma: no-cache`.
-*   🔄 **Refresh Token Rotation (RTR) with Grace Window**: Enforces Refresh
-    Token Rotation specifically targeting public clients (and optionally
-    confidential clients). The server-side token handler automatically
-    invalidates the parent refresh token upon rotation. If a token replay is
-    detected, the handler revokes the entire downstream token family tree. It
-    features a 30-second concurrency grace window allowing single-retry requests
-    to succeed during transient network failures.
-*   🚨 **Case-Insensitive Header Normalization**: Downcases all outbound
-    header keys in `HttpAdapter` to prevent Case-Sensitive Header Map
-    Duplication, resolving Header Field Modification vulnerabilities.
-*   📦 **Heap-Space DoS & Parameter Pollution Defense**: The Shelf adapter
-    enforces a 10 KB payload size ceiling and validates parameters at the raw
-    query string/byte stream level before map flattening.
+- [Protocol Overview](#protocol-overview)
+- [Features & Specification Coverage](#features--specification-coverage)
+- [Out of Scope](#out-of-scope)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+  - [1. OAuth 2.1 Client](#1-oauth-21-client)
+  - [2. Authorization Server](#2-authorization-server)
+  - [3. Resource Server](#3-resource-server)
+  - [4. Shelf HTTP Adapter & Middleware](#4-shelf-http-adapter--middleware)
+- [Production Deployment Requirements](#production-deployment-requirements)
+- [Where to Go Next](#where-to-go-next)
 
 ---
 
-## 🏗️ Clean Architecture Layout
-
-The package structure separates the core, pure domain rules from infrastructure
-and delivery adapters:
+## Protocol Overview
 
 ```mermaid
-graph TD
-    Domain[Domain Layer: Entities, Value Objects, Ports]
-    Adapters[Adapters Layer: HttpAdapter, ShelfAdapter]
-    App[Consumer Application]
+sequenceDiagram
+    autonumber
+    participant C as Client (OAuthClient)
+    participant AS as Auth Server (Authorize / Token)
+    participant RS as Resource Server (BearerTokenValidator)
 
-    App --> Domain
-    App --> Adapters
-    Adapters --> Domain
+    C->>C: CodeVerifier.generate() + CodeChallenge.s256()
+    C->>AS: GET /authorize (response_type=code, code_challenge, state)
+    AS->>AS: AuthorizeRequestValidator.validate()
+    AS-->>C: 303 See Other (code, state, iss)
+    C->>C: parseRedirect() + validateCallback(expectedState)
+    C->>AS: POST /token (grant_type=authorization_code, code, code_verifier)
+    AS->>AS: TokenRequestHandler.handle() (PKCE S256 + single-use check)
+    AS-->>C: 200 OK (access_token, refresh_token, Cache-Control: no-store)
+    C->>RS: GET /resource (Authorization: Bearer <token>)
+    RS->>RS: BearerTokenValidator.validate(requiredScopes)
+    RS-->>C: 200 OK (Protected Resource)
 ```
-
-- **Domain Layer** (`lib/src/domain/`): Houses the pure protocol value objects
-  (`CodeVerifier`, `CodeChallenge`), entities (`AuthRequest`, `TokenResult`,
-  `ClientRegistration`, `AuthCode`, `RefreshToken`), and abstract
-  ports/repositories (`ClientRepository`, `AuthCodeRepository`,
-  `TokenRepository`, `CryptoService`, `OAuthHttpClient`).
-- **Adapters Layer** (`lib/src/adapters/`): Adapts platform-specific
-  dependencies (e.g. `package:http` for client HTTP requests and `package:shelf`
-  for server adapters).
 
 ---
 
-## 🚀 Getting Started
+## Features & Specification Coverage
 
-Add the dependency to your `pubspec.yaml`:
+### Supported Roles, Grants & Authentication Methods
 
-```yaml
-dependencies:
-  oauth21:
-    path: ./path/to/oauth21 # or via pub.dev once published
-```
+| Capability | OAuth 2.1 Section | Key APIs |
+| :--- | :--- | :--- |
+| **Authorization Code Grant + PKCE (`S256`)** | Sections 4.1 & 7.5 | `CodeVerifier`, `CodeChallenge.s256`, `AuthorizeRequestValidator`, `TokenRequestHandler` |
+| **Refresh Token Grant & Rotation** | Sections 4.3.1–4.3.3 | `OAuthClient.exchangeRefreshToken`, `TokenRequestHandler`, `TokenRepository.rotateRefreshToken` |
+| **Client Credentials Grant** | Section 4.2 | `OAuthClient.exchangeClientCredentials`, `TokenRequestHandler` |
+| **Client Authentication (`client_secret_post` & `client_secret_basic`)** | Sections 2.4.1, 3.2.1 & 3.2.4 | `ClientAuthMethod.clientSecretPost` (default), `ClientAuthMethod.clientSecretBasic` |
+| **Bearer Token Resource Protection** | Sections 5.1–5.3 & 7.1 | `OAuthAuthenticatedClient`, `BearerTokenValidator`, `bearerAuthenticationMiddleware` |
 
-This package exposes specialized entry points depending on your runtime
-environment:
-- 📱 **Client Applications**: Import `package:oauth21/client.dart` to access
-  core client flow APIs.
-- 🖥️ **Authorization Servers**: Import `package:oauth21/server.dart` to
-  access validators, handlers, and Shelf adapters.
-- 📦 **Umbrella Exporter**: Import `package:oauth21/oauth21.dart` to export
-  both client and server APIs simultaneously.
+### URI Scheme & Endpoint Security Policy
+
+| URI Category | Allowed Schemes & Rules |
+| :--- | :--- |
+| **Authorization & Token Endpoints** | `https` required; cleartext `http` permitted only on loopback (`127.0.0.1`, `[::1]`, `localhost`) (Sections 1.5, 3.1 & 3.2). No fragments or userinfo. |
+| **Client Redirect URIs** | `https`, loopback `http` (with ephemeral port matching `1..65535` per Sections 2.3.1, 4.1.1 & 8.4.2), or reverse-domain private-use native schemes (e.g. `com.example.app:/cb`, Sections 2.3.1 & 8.4.3). Relative segments (`.` / `..`), fragments, userinfo, and dangerous schemes (`javascript:`, `data:`, `file:`) are rejected (Section 7.13). |
+| **Issuer Identifier (`iss`)** | `https` (or loopback `http` in local development) with non-empty host and no query or fragment components (Sections 4.1.2 & 7.15.1). |
+
+### Built-in Protocol Defenses
+
+- **PKCE `S256` Only**: `plain` code challenges are rejected across client and
+  server APIs (Sections 4.1.1 & 7.5.2); `S256` verification uses constant-time
+  comparison (`CryptoService.safeEquals`).
+- **Authorization Code Replay & DoS Protection**: Single-use atomic consumption
+  (`AuthCodeRepository.tryConsume`) with PKCE verification prior to family
+  revocation (Sections 4.1.2, 4.1.3 & 7.5.3).
+- **Refresh Token Rotation & Grace Window**: Rotates refresh tokens on every
+  redemption while preserving the original grant scope and expiration ceiling
+  (Sections 4.3.1 & 4.3.3), with a configurable concurrency grace window
+  (default 30 seconds) and automatic family revocation on replay.
+- **Query Token & Redirect Leakage Prevention**: `OAuthAuthenticatedClient`
+  disables HTTP redirect following (`followRedirects = false`) and rejects
+  requests if the access token appears anywhere in the request query string
+  (Sections 5.1 & 7.1.3.7).
+- **Parameter Pollution & ABNF Filtering**: Rejects duplicate parameters in
+  query strings or form bodies (Sections 3.1 & 3.2) and validates `client_id`,
+  `state`, `code`, `scope`, `grant_type`, `error`, `error_description`,
+  `error_uri`, and `token_type` against OAuth 2.1 Section 5.1.1 (`token68`) and
+  Appendix A ABNF rules (`VSCHAR`, `NQCHAR`, `NQSCHAR`, `name-char`).
 
 ---
 
-## 📖 Client-Side Usage Guide
+## Out of Scope
 
-To build a client application, start by importing `package:oauth21/client.dart`.
+To keep the baseline audit surface small and dependency-free, the following are
+intentionally excluded from this package:
 
-### 1. Initialize the OAuth 2.1 Client
-Create the core coordinator using the standard `HttpAdapter` (or provide your
-own platform port):
+- **Deprecated OAuth 2.0 Grants**: The Implicit grant (`response_type=token`),
+  Resource Owner Password Credentials grant (`grant_type=password`), and PKCE
+  `plain` transformation are removed by OAuth 2.1 (Sections 7.5.2 & 10) and are
+  not supported.
+- **Bearer Tokens in Query Strings or Form Bodies**: Query-string bearer tokens
+  are prohibited by OAuth 2.1 (Sections 5.1 & 7.1.3.7), and optional
+  form-encoded body tokens (Section 5.1.2) are not supported; only the mandatory
+  `Authorization: Bearer <token>` HTTP header (Section 5.1.1) is supported.
+- **Optional OAuth 2.x Extension Specifications**: OpenID Connect (OIDC) ID
+  Token / JWT verification, DPoP (RFC 9449), Pushed Authorization Requests
+  (RFC 9126), Dynamic Client Registration (RFC 7591), Token Introspection
+  (RFC 7662), and Token Revocation (RFC 7009) are not bundled in the core
+  package.
+- **Database Persistence & Login UI**: Server components depend on repository
+  ports (`ClientRepository`, `AuthCodeRepository`, `TokenRepository`,
+  `CryptoService`) and delegate interactive login/consent HTML rendering to your
+  application.
+
+---
+
+## Getting Started
+
+Add `oauth21` to your `pubspec.yaml`:
+
+```bash
+dart pub add oauth21
+```
+
+Import the entrypoint that matches your application role:
+
+```dart
+// For OAuth 2.1 client applications:
+import 'package:oauth21/client.dart';
+
+// For OAuth 2.1 authorization and resource servers:
+import 'package:oauth21/server.dart';
+```
+
+---
+
+## Usage
+
+### 1. OAuth 2.1 Client
+
+Use `OAuthClient` to coordinate PKCE authorization requests, callback
+validation, token exchanges, and authenticated resource requests:
 
 ```dart
 import 'package:http/http.dart' as http;
 import 'package:oauth21/client.dart';
 
-final httpClient = http.Client();
+Future<void> runClientFlow() async {
+  final httpClient = http.Client();
 
-final oauthClient = OAuthClient(
-  authorizationEndpoint: 'https://auth.example.com/authorize',
-  tokenEndpoint: 'https://auth.example.com/token',
-  clientId: 'my-client-id',
-  httpClient: HttpAdapter(httpClient),
-  // Optional confidential client credentials (defaults to
-  // ClientAuthMethod.clientSecretPost per OAuth 2.1 Section 2.4.1; use
-  // ClientAuthMethod.clientSecretBasic for HTTP Basic authentication):
-  // clientSecret: 'my-client-secret',
-  // authMethod: ClientAuthMethod.clientSecretPost,
-  // Optional: prevents mix-up attacks
-  expectedIssuer: 'https://auth.example.com',
-);
-```
-
-### 2. Generate PKCE Secrets
-Create cryptographically secure entropy keys and compute the mandatory SHA-256
-challenge:
-
-```dart
-import 'package:oauth21/client.dart';
-
-final codeVerifier = CodeVerifier.generate();
-final codeChallenge = CodeChallenge.s256(codeVerifier);
-
-print('Verifier: ${codeVerifier.value}'); // Masked in toString()
-print('Challenge: ${codeChallenge.value}'); // Unpadded base64url
-```
-
-### 3. Build the Front-Channel Authorization Request
-Create the validation-hardened authorization redirect URL:
-
-```dart
-import 'package:oauth21/client.dart';
-
-final authRequest = oauthClient.createAuthorizationRequest(
-  redirectUri: Uri.parse('https://client.example.com/callback'),
-  state: 'secure-random-state', // CSRF state token
-  codeChallenge: codeChallenge,
-  scope: 'read write',
-);
-
-final authorizationUrl = authRequest.toUri();
-// Direct the user agent/browser to authorizationUrl...
-```
-
-### 4. Parse & Validate Redirect Callbacks
-Once the server redirects the user back, use `DefaultRequestParser` to safely
-process parameters:
-
-```dart
-import 'package:oauth21/client.dart';
-
-final callbackUri = Uri.parse(
-  'https://client.example.com/callback'
-  '?code=auth-code-123&state=secure-random-state'
-  '&iss=https%3A%2F%2Fauth.example.com',
-);
-
-const parser = DefaultRequestParser();
-final redirectParams = parser.parseRedirect(callbackUri);
-
-try {
-  // Validate CSRF state token and server identity
-  oauthClient.validateCallback(
-    redirectParams,
-    expectedState: 'secure-random-state',
+  final oauthClient = OAuthClient(
+    authorizationEndpoint: 'https://auth.example.com/authorize',
+    tokenEndpoint: 'https://auth.example.com/token',
+    clientId: 'my-client-id',
+    // Optional confidential client secret. Defaults to
+    // ClientAuthMethod.clientSecretPost; pass
+    // ClientAuthMethod.clientSecretBasic to use the Authorization header.
+    clientSecret: 'my-client-secret',
+    authMethod: ClientAuthMethod.clientSecretPost,
+    expectedIssuer: 'https://auth.example.com',
+    httpClient: HttpAdapter(httpClient),
   );
-  
-  print('Callback parameters validated successfully.');
-} on StateError catch (e) {
-  print('CSRF or Mix-up validation failed: $e');
-}
-```
 
-### 5. Exchange Code for Access Token
-Perform the out-of-band POST request to retrieve the tokens securely:
+  // 1. Generate PKCE verifier and S256 challenge.
+  final codeVerifier = CodeVerifier.generate();
+  final codeChallenge = CodeChallenge.s256(codeVerifier);
+  final redirectUri = Uri.parse('https://client.example.com/callback');
+  const csrfState = 'random-csrf-token-123';
 
-```dart
-import 'package:oauth21/client.dart';
+  // 2. Build the authorization redirect URI.
+  final authRequest = oauthClient.createAuthorizationRequest(
+    redirectUri: redirectUri,
+    codeChallenge: codeChallenge,
+    state: csrfState,
+    scope: 'read write',
+  );
+  final authorizeUri = authRequest.toUri();
+  print('Redirect user agent to: $authorizeUri');
 
-if (redirectParams.code != null) {
+  // 3. Parse and validate the callback URI from the authorization server.
+  final callbackUri = Uri.parse(
+    'https://client.example.com/callback'
+    '?code=issued-auth-code'
+    '&state=$csrfState'
+    '&iss=https%3A%2F%2Fauth.example.com',
+  );
+  final callbackParams = oauthClient.requestParser.parseRedirect(callbackUri);
+  oauthClient.validateCallback(callbackParams, expectedState: csrfState);
+
+  // 4. Exchange the authorization code for tokens.
   final tokenResult = await oauthClient.exchangeCode(
-    code: redirectParams.code!,
+    code: callbackParams.code!,
     codeVerifier: codeVerifier,
+    redirectUri: redirectUri,
   );
 
   switch (tokenResult) {
-    case TokenSuccess(:final accessToken, :final tokenType):
-      print('Access Token: $accessToken');
-      print('Token Type: $tokenType'); // e.g., 'Bearer'
-      
-    case TokenError(:final error, :final errorDescription):
-      print('Authorization Error: $error - $errorDescription');
-  }
-}
-```
-
-### 6. Make Authenticated API Requests
-Use the `OAuthAuthenticatedClient` wrapper to automatically inject token headers
-and prevent query leakage:
-
-```dart
-import 'package:oauth21/client.dart';
-
-// Works with Bearer or any custom token scheme prefix
-final authenticatedClient = OAuthAuthenticatedClient(
-  httpClient,
-  accessToken,
-  tokenType: 'Bearer', // Defaults to 'Bearer'
-);
-
-// If the access token is accidentally attached to the query string,
-// this call will throw a StateError before hitting the network.
-final response = await authenticatedClient.get(
-  Uri.parse('https://api.example.com/profile'),
-);
-```
-
----
-
-## 📖 Server-Side Usage Guide
-
-To build an Authorization Server, import `package:oauth21/server.dart`.
-
-### 1. Implement Server Repository Ports
-
-Implement the database and state tracking interfaces defined in the domain
-layer:
-
-```dart
-import 'package:oauth21/server.dart';
-
-class MyClientRepository implements ClientRepository {
-  @override
-  Future<ClientRegistration?> findById(String clientId) async {
-    // Retrieve client registration from DB
-  }
-}
-
-class MyAuthCodeRepository implements AuthCodeRepository {
-  @override
-  Future<AuthCode?> findByCode(String code) async { ... }
-
-  @override
-  Future<void> save(AuthCode authCode) async { ... }
-
-  @override
-  Future<bool> tryConsume(String code) async {
-    // Atomically mark unused, non-expired code as used and return true
-  }
-}
-
-class MyTokenRepository implements TokenRepository {
-  @override
-  Future<void> saveAccessToken(AccessToken token) async { ... }
-
-  @override
-  Future<void> saveRefreshToken(RefreshToken token) async { ... }
-
-  @override
-  Future<bool> saveIssuedTokens({
-    required AccessToken accessToken,
-    RefreshToken? refreshToken,
-  }) async { ... }
-
-  @override
-  Future<bool> rotateRefreshToken({
-    required String oldTokenHash,
-    required AccessToken newAccessToken,
-    required RefreshToken newRefreshToken,
-    Duration graceWindow = const Duration(seconds: 30),
-  }) async { ... }
-
-  @override
-  Future<void> revokeByAuthorizationCode(String authorizationCode) async {
-    // Tombstone code and revoke all tokens descended from authorizationCode
-  }
-
-  @override
-  Future<AccessToken?> findAccessTokenByHash(String hash) async { ... }
-
-  @override
-  Future<RefreshToken?> findRefreshTokenByHash(String hash) async { ... }
-
-  @override
-  Future<void> revokeRefreshTokenByHash(String hash) async { ... }
-
-  @override
-  Future<void> revokeAllTokensForClientAndUser(
-    String clientId,
-    String? userId,
-  ) async {
-    // Cascading revocation of all client-user tokens on replay detection
-  }
-}
-```
-
-### 2. Validate Authorization Endpoint Requests
-
-Use `AuthorizeRequestValidator` to validate incoming parameters at the
-authorization endpoint. This validator separates **redirectable** and
-**non-redirectable** errors to prevent open-redirect phishing vectors.
-
-```dart
-import 'package:oauth21/server.dart';
-
-final validator = AuthorizeRequestValidator(myClientRepository);
-
-// params is a Map<String, List<String>>
-// (e.g. request.requestedUri.queryParametersAll)
-final result = await validator.validate(params);
-
-switch (result) {
-  case AuthorizeRequestValid(:final client, :final requestedScopes):
-    // Present consent/login screen to the user
-    print('Client ${client.clientId} requested scopes: $requestedScopes');
-
-  case AuthorizeRedirectableError(
-    :final validatedRedirectUri,
-    :final errorCode,
-    :final errorDescription,
-    :final state,
-  ):
-    // Safely redirect the user agent back to client's redirect URI with the
-    // error parameters and mandatory OAuth 2.1 issuer identifier ('iss')
-    final errorUri = validatedRedirectUri.replace(
-      queryParameters: {
-        ...validatedRedirectUri.queryParameters,
-        'error': errorCode,
-        'error_description': errorDescription,
-        if (state != null) 'state': state,
-        'iss': 'https://auth.example.com',
-      },
-    );
-
-  case AuthorizeDirectError(:final errorDescription):
-    // Show error directly on screen (e.g., 400 Bad Request) to prevent
-    // open-redirection
-    print('Fatal error: $errorDescription');
-}
-```
-
-### 3. Process Token Endpoint Requests
-
-Use `TokenRequestHandler` to handle token requests (Authorization Code, Refresh
-Token, and Client Credentials grants) securely.
-
-```dart
-import 'package:oauth21/server.dart';
-
-final tokenHandler = TokenRequestHandler(
-  clientRepository: myClientRepository,
-  authCodeRepository: myAuthCodeRepository,
-  tokenRepository: myTokenRepository,
-  cryptoService: MyCryptoService(),
-);
-
-// Process the incoming POST request body and headers
-final response = await tokenHandler.handle(
-  bodyParams, // Map<String, String>
-  authorizationHeader: request.headers['Authorization'],
-  isHttps: true, // Enforce HTTPS channel security
-);
-
-// Send response.statusCode, response.body, and response.headers back to client
-```
-
----
-
-## 🌐 Shelf Adapter Middleware
-
-Import `package:oauth21/server.dart` to use the built-in Shelf handlers to
-easily plug OAuth 2.1 compliance into a Shelf routing setup:
-
-```dart
-import 'package:shelf/shelf.dart' as shelf;
-import 'package:shelf_router/shelf_router.dart';
-import 'package:oauth21/server.dart';
-
-final router = Router();
-
-// 1. Authorize Endpoint
-router.get('/authorize', (shelf.Request request) {
-  return handleAuthorizeRequest(
-    request,
-    validator: authorizeValidator,
-    issuer: 'https://auth.example.com',
-    onConsentRequired: (req, validationResult) async {
-      // User consent/auth login flow...
-      // Redirect back with Auth Code:
-      return redirectWithAuthorizationCode(
-        redirectUri: validationResult.validatedRedirectUri,
-        code: 'generated-auth-code-123',
-        state: validationResult.state,
-        issuer: 'https://auth.example.com',
+    case TokenSuccess(
+      :final accessToken,
+      :final refreshToken,
+      :final tokenType,
+    ):
+      // 5. Call a protected resource server using OAuthAuthenticatedClient.
+      final apiClient = OAuthAuthenticatedClient(
+        httpClient,
+        accessToken,
+        tokenType: tokenType,
       );
-    },
+      final apiResponse = await apiClient.get(
+        Uri.parse('https://api.example.com/v1/profile'),
+      );
+      print('Profile status: ${apiResponse.statusCode}');
+
+      // 6. Refresh an access token (optionally narrowing scope).
+      if (refreshToken != null) {
+        final refreshed = await oauthClient.exchangeRefreshToken(
+          refreshToken,
+          scope: 'read',
+        );
+        print('Refresh result: $refreshed');
+      }
+
+    case TokenError(:final error, :final errorDescription):
+      print('Token request failed: $error ($errorDescription)');
+  }
+
+  // Confidential clients can also request machine-to-machine tokens:
+  final ccResult = await oauthClient.exchangeClientCredentials(scope: 'read');
+  print('Client credentials result: $ccResult');
+}
+```
+
+### 2. Authorization Server
+
+Implement the four server ports (`ClientRepository`, `AuthCodeRepository`,
+`TokenRepository`, and `CryptoService`), then wire `AuthorizeRequestValidator`
+and `TokenRequestHandler` into your HTTP framework:
+
+```dart
+import 'package:oauth21/server.dart';
+
+Future<void> handleServerRequests({
+  required ClientRepository clientRepository,
+  required AuthCodeRepository authCodeRepository,
+  required TokenRepository tokenRepository,
+  required CryptoService cryptoService,
+  required Map<String, List<String>> authorizeQueryParams,
+  required Map<String, String> tokenBodyParams,
+  String? authorizationHeader,
+}) async {
+  // 1. Validate GET /authorize query parameters.
+  final authorizeValidator = AuthorizeRequestValidator(clientRepository);
+  final authResult = await authorizeValidator.validate(authorizeQueryParams);
+
+  switch (authResult) {
+    case AuthorizeRequestValid(
+      :final client,
+      :final validatedRedirectUri,
+      :final requestedScopes,
+    ):
+      // Render login/consent UI, then issue an AuthCode and 303 redirect.
+      print(
+        'Consent needed for ${client.clientId} '
+        'at $validatedRedirectUri ($requestedScopes)',
+      );
+
+    case AuthorizeRedirectableError(
+      :final validatedRedirectUri,
+      :final errorCode,
+      :final errorDescription,
+      :final state,
+    ):
+      // Redirect 303 back to validatedRedirectUri with error, state, and iss.
+      final errorLocation = validatedRedirectUri.replace(
+        queryParameters: {
+          ...validatedRedirectUri.queryParameters,
+          'error': errorCode,
+          'error_description': errorDescription,
+          if (state != null) 'state': state,
+          'iss': 'https://auth.example.com',
+        },
+      );
+      print('Redirect 303 to: $errorLocation');
+
+    case AuthorizeDirectError(:final errorCode, :final errorDescription):
+      // Do NOT redirect; render a 400 Bad Request page directly.
+      print('Direct 400 error: $errorCode ($errorDescription)');
+  }
+
+  // 2. Process POST /token requests.
+  final tokenHandler = TokenRequestHandler(
+    clientRepository: clientRepository,
+    authCodeRepository: authCodeRepository,
+    tokenRepository: tokenRepository,
+    cryptoService: cryptoService,
   );
-});
 
-// 2. Token Endpoint (POST)
-router.post('/token', (shelf.Request request) {
-  return handleTokenRequest(
-    request,
-    handler: tokenRequestHandler,
-    isHttps: true, // enforces TLS compliance
+  final tokenResponse = await tokenHandler.handle(
+    tokenBodyParams,
+    authorizationHeader: authorizationHeader,
+    isHttps: true,
   );
-});
+  print('Token status: ${tokenResponse.statusCode}');
+}
+```
 
-// 3. Protected Resource Server Endpoint (Bearer Token Middleware)
-final bearerValidator = BearerTokenValidator(
-  tokenRepository: myTokenRepository,
-  cryptoService: MyCryptoService(),
-  realm: 'example-api',
-);
+### 3. Resource Server
 
-final protectedHandler = const shelf.Pipeline()
-    .addMiddleware(
-      bearerAuthenticationMiddleware(
-        validator: bearerValidator,
-        requiredScopes: {'read'},
+Use `BearerTokenValidator` directly in any Dart server framework to validate
+`Authorization: Bearer <token>` headers and required scopes:
+
+```dart
+import 'package:oauth21/server.dart';
+
+Future<void> verifyProtectedResource({
+  required TokenRepository tokenRepository,
+  required CryptoService cryptoService,
+  required List<String> authorizationHeaders,
+}) async {
+  final validator = BearerTokenValidator(
+    tokenRepository: tokenRepository,
+    cryptoService: cryptoService,
+    realm: 'example-api',
+    errorUri: 'https://api.example.com/docs/errors',
+  );
+
+  final result = await validator.validate(
+    authorizationHeaders: authorizationHeaders,
+    requiredScopes: const {'read'},
+    isHttps: true,
+  );
+
+  switch (result) {
+    case BearerTokenValid(:final accessToken):
+      print('Authorized subject: ${accessToken.userId}');
+    case BearerTokenInvalid(:final statusCode, :final headers):
+      // Return statusCode (400, 401, or 403) and headers['WWW-Authenticate'].
+      print('Rejected ($statusCode): ${headers['WWW-Authenticate']}');
+  }
+}
+```
+
+### 4. Shelf HTTP Adapter & Middleware
+
+When using `package:shelf`, plug `handleAuthorizeRequest`, `handleTokenRequest`,
+and `bearerAuthenticationMiddleware` directly into your routes:
+
+```dart
+import 'package:oauth21/server.dart';
+import 'package:shelf/shelf.dart' as shelf;
+
+shelf.Handler buildShelfRoutes({
+  required AuthorizeRequestValidator authorizeValidator,
+  required TokenRequestHandler tokenHandler,
+  required BearerTokenValidator bearerValidator,
+  required AuthCodeRepository authCodeRepo,
+  required CryptoService cryptoService,
+}) {
+  const issuer = 'https://auth.example.com';
+
+  final protectedResource = const shelf.Pipeline()
+      .addMiddleware(
+        bearerAuthenticationMiddleware(
+          validator: bearerValidator,
+          requiredScopes: const {'read'},
+          isHttps: true,
+        ),
+      )
+      .addHandler((request) {
+        final token = getAccessTokenFromContext(request)!;
+        return shelf.Response.ok('User: ${token.userId}');
+      });
+
+  return (shelf.Request request) async {
+    return switch (request.url.path) {
+      'authorize' => handleAuthorizeRequest(
+        request,
+        validator: authorizeValidator,
+        issuer: issuer,
+        onConsentRequired: (req, valid) async {
+          final code = cryptoService.generateRandomEntropyString();
+          await authCodeRepo.save(
+            AuthCode(
+              code: code,
+              clientId: valid.client.clientId,
+              redirectUri: valid.validatedRedirectUri,
+              userId: 'user-123',
+              codeChallenge: valid.codeChallenge,
+              codeChallengeMethod: valid.codeChallengeMethod,
+              expiresAt: DateTime.now().add(const Duration(minutes: 5)),
+              scope: valid.requestedScopes.join(' '),
+            ),
+          );
+          return redirectWithAuthorizationCode(
+            redirectUri: valid.validatedRedirectUri,
+            code: code,
+            state: valid.state,
+            issuer: issuer,
+          );
+        },
+      ),
+      'token' => handleTokenRequest(
+        request,
+        handler: tokenHandler,
         isHttps: true,
       ),
-    )
-    .addHandler((shelf.Request request) {
-      final token = getAccessTokenFromContext(request)!;
-      return shelf.Response.ok('Authenticated subject: ${token.userId}');
-    });
+      'resource' => protectedResource(request),
+      _ => shelf.Response.notFound('Not Found'),
+    };
+  };
+}
 ```
 
 ---
 
-## 🔒 Production Deployment & Host Security Checklist
+## Production Deployment Requirements
 
-While `oauth21` enforces protocol-level invariants automatically, production
-deployments must ensure the surrounding host infrastructure satisfies the
-following OAuth 2.1 requirements:
+Protocol-level invariants are enforced automatically, but production deployments
+must configure the surrounding host environment to satisfy these OAuth 2.1
+requirements:
 
-*   **TLS Termination & `isHttps` Resolution (Section 1.5)**: Always serve
-    authorization, token, and resource endpoints over TLS. Only pass
-    `isHttps: true` when `request.requestedUri.scheme == 'https'` or when a
-    trusted reverse proxy has verified TLS termination.
-*   **Clickjacking Framing Headers on Consent UI (Section 7.11)**: Direct error
-    responses from `handleAuthorizeRequest` automatically include
-    `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`.
-    Any interactive HTML login/consent pages returned by `onConsentRequired`
-    must also include these headers to prevent UI redressing.
-*   **Rate Limiting on Client Authentication & Token Endpoints (Section 2.4.1)**:
-    Enforce brute-force rate limiting and account lockout controls on `/token`
-    and user login endpoints at the API gateway or middleware layer.
-*   **Cryptographically Secure Randomness (Section 7.7)**: Implement
-    `CryptoService.generateRandomEntropyString` using `Random.secure()` with at
-    least 128 bits (and preferably >= 160 bits; 256 bits by default) of entropy.
-*   **Atomic Storage Operations (Sections 4.1.2, 4.1.3 & 4.3.3)**: Implement
-    `AuthCodeRepository.tryConsume`, `TokenRepository.saveIssuedTokens`, and
-    `TokenRepository.rotateRefreshToken` using atomic database transactions or
-    compare-and-set operations so concurrent replay attempts are reliably
-    detected and trigger family revocation.
+- **TLS Termination & `isHttps` (Sections 1.5, 7.6 & 7.14)**: Serve
+  authorization, token, and resource endpoints over TLS. Pass `isHttps: true`
+  only when `request.requestedUri.scheme == 'https'` or when a trusted reverse
+  proxy has verified TLS termination.
+- **Clickjacking Headers on Consent UI (Section 7.11)**: Direct error responses
+  from `handleAuthorizeRequest` include `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'`. Interactive HTML login and
+  consent responses returned by `onConsentRequired` must also set these headers.
+- **Rate Limiting (Sections 2.4.1 & 7.7)**: Enforce brute-force rate limiting
+  and account lockout controls on `/token` and login endpoints at the reverse
+  proxy or middleware layer.
+- **Cryptographic Entropy (Section 7.7)**: Implement
+  `CryptoService.generateRandomEntropyString` with `Random.secure()` providing
+  at least 128 bits (and preferably >= 160 bits; 256 bits by default) of
+  entropy.
+- **Atomic Persistence (Sections 4.1.2, 4.1.3 & 4.3.3)**: Implement
+  `AuthCodeRepository.tryConsume`, `TokenRepository.saveIssuedTokens`, and
+  `TokenRepository.rotateRefreshToken` with atomic database transactions or
+  compare-and-set operations so concurrent replay attempts are reliably detected
+  and trigger token family revocation.
 
 ---
 
-## 🧪 Running Tests & Diagnostics
+## Where to Go Next
 
-To run the complete validation test suite (conforming to the OAuth 2.1
-specification):
-
-```bash
-dart test
-```
-
-To run static analysis checks:
-
-```bash
-dart analyze
-```
+- **Runnable End-to-End Demo**: See
+  [`example/oauth21_example.dart`](example/oauth21_example.dart) for a complete,
+  self-contained script running an in-memory Shelf Authorization Server and
+  `OAuthClient` flow (`dart run example/oauth21_example.dart`).
+- **Roadmap**: Planned follow-up work includes optional OAuth 2.x security
+  extensions such as Demonstrating Proof-of-Possession (DPoP, RFC 9449).
+- **Issues & Feedback**: File bugs or feature requests on the
+  [GitHub issue tracker](https://github.com/dropbear-software/oauth21/issues).
+- **Contributing**: Run `dart format .`, `dart analyze --fatal-infos`, and
+  `dart test` before opening a pull request.
