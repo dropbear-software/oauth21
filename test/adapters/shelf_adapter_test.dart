@@ -180,8 +180,7 @@ void main() {
           issuer: 'https://auth.example.com',
           onConsentRequired: (request, result) {
             consentCalled = true;
-            expect(result.isValid, isTrue);
-            expect(result.client?.clientId, equals('client-123'));
+            expect(result.client.clientId, equals('client-123'));
             return Future.value(shelf.Response.ok('consent needed'));
           },
         );

@@ -47,7 +47,7 @@ Future<shelf.Response> handleAuthorizeRequest(
   required String issuer,
   required Future<shelf.Response> Function(
     shelf.Request request,
-    AuthorizeValidationResult result,
+    AuthorizeRequestValid result,
   )
   onConsentRequired,
 }) async {
@@ -72,31 +72,34 @@ Future<shelf.Response> handleAuthorizeRequest(
 
   final result = await validator.validate(params);
 
-  if (!result.isValid) {
-    if (result.isRedirectable && result.validatedRedirectUri != null) {
-      return redirectWithAuthorizationError(
-        redirectUri: result.validatedRedirectUri!,
-        error: result.errorCode!,
+  return switch (result) {
+    AuthorizeRequestValid() => onConsentRequired(request, result),
+    AuthorizeRedirectableError(
+      :final validatedRedirectUri,
+      :final errorCode,
+      :final errorDescription,
+      :final state,
+    ) =>
+      redirectWithAuthorizationError(
+        redirectUri: validatedRedirectUri,
+        error: errorCode,
         issuer: issuer,
-        errorDescription: result.errorDescription,
-        state: result.state,
-      );
-    } else {
-      return shelf.Response.badRequest(
+        errorDescription: errorDescription,
+        state: state,
+      ),
+    AuthorizeDirectError(:final errorCode, :final errorDescription) =>
+      shelf.Response.badRequest(
         body: jsonEncode({
-          'error': result.errorCode,
-          'error_description': result.errorDescription,
+          'error': errorCode,
+          'error_description': errorDescription,
         }),
         headers: {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store',
           'Pragma': 'no-cache',
         },
-      );
-    }
-  }
-
-  return onConsentRequired(request, result);
+      ),
+  };
 }
 
 /// Redirects the user-agent back to the client redirect URI with the auth code.
@@ -270,25 +273,27 @@ shelf.Middleware bearerAuthenticationMiddleware({
         isHttps: isHttps,
       );
 
-      if (!result.isValid) {
-        final body = result.errorCode != null
-            ? jsonEncode({
-                'error': result.errorCode,
-                if (result.errorDescription != null)
-                  'error_description': result.errorDescription,
-              })
-            : null;
-        return shelf.Response(
-          result.statusCode,
-          body: body,
-          headers: result.headers,
-        );
-      }
-
-      final updatedRequest = request.change(
-        context: {oauthAccessTokenContextKey: result.accessToken!},
-      );
-      return innerHandler(updatedRequest);
+      return switch (result) {
+        BearerTokenValid(:final accessToken) => innerHandler(
+          request.change(context: {oauthAccessTokenContextKey: accessToken}),
+        ),
+        BearerTokenInvalid(
+          :final statusCode,
+          :final headers,
+          :final errorCode,
+          :final errorDescription,
+        ) =>
+          shelf.Response(
+            statusCode,
+            body: errorCode != null
+                ? jsonEncode({
+                    'error': errorCode,
+                    'error_description': ?errorDescription,
+                  })
+                : null,
+            headers: headers,
+          ),
+      };
     };
   };
 }

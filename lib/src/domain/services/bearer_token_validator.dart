@@ -7,46 +7,53 @@ import '../ports/token_repository.dart';
 
 /// Represents the result of validating an incoming Bearer token request at a
 /// resource server endpoint (OAuth 2.1 Section 5).
+///
+/// This is a sealed hierarchy with two outcomes:
+/// - [BearerTokenValid]: The bearer token is valid and satisfies the required
+///   scopes.
+/// - [BearerTokenInvalid]: The request failed authentication or authorization.
 @immutable
-class BearerValidationResult {
-  /// Whether the bearer token is valid and satisfies the required scopes.
-  final bool isValid;
+sealed class BearerValidationResult {
+  /// Creates a [BearerValidationResult].
+  const BearerValidationResult();
+}
 
-  /// The HTTP status code (`200`, `400`, `401`, or `403`).
+/// Represents a successfully validated Bearer token request.
+@immutable
+final class BearerTokenValid extends BearerValidationResult {
+  /// The validated [AccessToken].
+  final AccessToken accessToken;
+
+  /// Creates a successful [BearerTokenValid] result for [accessToken].
+  const BearerTokenValid(this.accessToken);
+}
+
+/// Represents a failed Bearer token validation result.
+@immutable
+final class BearerTokenInvalid extends BearerValidationResult {
+  /// The HTTP error status code (`400`, `401`, or `403`).
   final int statusCode;
-
-  /// The validated [AccessToken] when [isValid] is `true`.
-  final AccessToken? accessToken;
-
-  /// The OAuth 2.1 bearer error code (`invalid_request`, `invalid_token`, or
-  /// `insufficient_scope`), or `null` when [isValid] is `true` or when the
-  /// request lacked authentication credentials (Section 5.3.1).
-  final String? errorCode;
-
-  /// Human-readable description of the error, if any.
-  final String? errorDescription;
 
   /// HTTP response headers to include on error responses (such as
   /// `WWW-Authenticate`, `Cache-Control`, `Pragma`, and `Content-Type`).
   final Map<String, String> headers;
 
-  /// Creates a successful [BearerValidationResult] for [accessToken].
-  const BearerValidationResult.valid(AccessToken this.accessToken)
-    : isValid = true,
-      statusCode = 200,
-      errorCode = null,
-      errorDescription = null,
-      headers = const {};
+  /// The OAuth 2.1 bearer error code (`invalid_request`, `invalid_token`, or
+  /// `insufficient_scope`), or `null` when the request lacked authentication
+  /// credentials (Section 5.3.1).
+  final String? errorCode;
 
-  /// Creates a failed [BearerValidationResult] with the specified HTTP
+  /// Human-readable description of the error, if any.
+  final String? errorDescription;
+
+  /// Creates a failed [BearerTokenInvalid] result with the specified HTTP
   /// [statusCode], [headers], and optional [errorCode] / [errorDescription].
-  const BearerValidationResult.invalid({
+  const BearerTokenInvalid({
     required this.statusCode,
     required this.headers,
     this.errorCode,
     this.errorDescription,
-  }) : isValid = false,
-       accessToken = null;
+  });
 }
 
 /// Validates Bearer access tokens presented to resource server endpoints in
@@ -112,13 +119,13 @@ class BearerTokenValidator {
     };
   }
 
-  BearerValidationResult _bearerError({
+  BearerTokenInvalid _bearerError({
     required int statusCode,
     required String errorCode,
     required String errorDescription,
     String? scope,
   }) {
-    return BearerValidationResult.invalid(
+    return BearerTokenInvalid(
       statusCode: statusCode,
       errorCode: errorCode,
       errorDescription: errorDescription,
@@ -164,7 +171,7 @@ class BearerTokenValidator {
 
     // 1. Enforce transport security (OAuth 2.1 Section 5.1.1 / 1.5)
     if (!isHttps) {
-      return const BearerValidationResult.invalid(
+      return const BearerTokenInvalid(
         statusCode: 400,
         errorCode: 'invalid_request',
         errorDescription: 'HTTPS is required for resource server endpoints.',
@@ -194,7 +201,7 @@ class BearerTokenValidator {
     if (effectiveHeader == null ||
         effectiveHeader.trim().isEmpty ||
         !_bearerSchemePrefixRegex.hasMatch(effectiveHeader.trim())) {
-      return BearerValidationResult.invalid(
+      return BearerTokenInvalid(
         statusCode: 401,
         headers: _errorHeaders(
           wwwAuthenticate: _buildWwwAuthenticate(),
@@ -242,6 +249,6 @@ class BearerTokenValidator {
       }
     }
 
-    return BearerValidationResult.valid(accessToken);
+    return BearerTokenValid(accessToken);
   }
 }

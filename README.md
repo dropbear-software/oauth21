@@ -269,22 +269,29 @@ final validator = AuthorizeRequestValidator(myClientRepository);
 // params is a Map<String, List<String>> (e.g. request.requestedUri.queryParametersAll)
 final result = await validator.validate(params);
 
-if (result.isValid) {
-  // Present consent/login screen to the user
-  final client = result.client!;
-  final scopes = result.requestedScopes;
-} else if (result.isRedirectable) {
-  // Safely redirect the user agent back to client's redirect URI with the error parameters
-  final errorUri = result.validatedRedirectUri!.replace(
-    queryParameters: {
-      'error': result.errorCode!,
-      'error_description': result.errorDescription!,
-      if (result.state != null) 'state': result.state!,
-    },
-  );
-} else {
-  // Show error directly on screen (e.g., 400 Bad Request) to prevent open-redirection
-  print('Fatal error: ${result.errorDescription}');
+switch (result) {
+  case AuthorizeRequestValid(:final client, :final requestedScopes):
+    // Present consent/login screen to the user
+    print('Client ${client.clientId} requested scopes: $requestedScopes');
+
+  case AuthorizeRedirectableError(
+    :final validatedRedirectUri,
+    :final errorCode,
+    :final errorDescription,
+    :final state,
+  ):
+    // Safely redirect the user agent back to client's redirect URI with the error parameters
+    final errorUri = validatedRedirectUri.replace(
+      queryParameters: {
+        'error': errorCode,
+        'error_description': errorDescription,
+        if (state != null) 'state': state,
+      },
+    );
+
+  case AuthorizeDirectError(:final errorDescription):
+    // Show error directly on screen (e.g., 400 Bad Request) to prevent open-redirection
+    print('Fatal error: $errorDescription');
 }
 ```
 
@@ -334,9 +341,9 @@ router.get('/authorize', (shelf.Request request) {
       // User consent/auth login flow...
       // Redirect back with Auth Code:
       return redirectWithAuthorizationCode(
-        redirectUri: validationResult.validatedRedirectUri!,
+        redirectUri: validationResult.validatedRedirectUri,
         code: 'generated-auth-code-123',
-        state: validationResult.state!,
+        state: validationResult.state,
         issuer: 'https://auth.example.com',
       );
     },

@@ -168,7 +168,7 @@ TokenSuccess _parseTokenSuccess(Map<String, dynamic> json, int? statusCode) {
 
 /// Represents a successful token exchange response.
 @immutable
-class TokenSuccess extends TokenResult {
+final class TokenSuccess extends TokenResult {
   /// The access token issued by the authorization server.
   final String accessToken;
 
@@ -223,7 +223,7 @@ class TokenSuccess extends TokenResult {
 
 /// Represents an OAuth 2.1 protocol error response.
 @immutable
-class TokenError extends TokenResult {
+final class TokenError extends TokenResult {
   /// The error code (e.g. "invalid_request", "invalid_grant").
   final String error;
 

@@ -96,9 +96,10 @@ void main() {
       final res = await validator.validate(
         authorizationHeader: 'Bearer $validRawToken',
       );
-      expect(res.isValid, isFalse);
-      expect(res.statusCode, equals(400));
-      expect(res.errorCode, equals('invalid_request'));
+      expect(res, isA<BearerTokenInvalid>());
+      final invalid = res as BearerTokenInvalid;
+      expect(invalid.statusCode, equals(400));
+      expect(invalid.errorCode, equals('invalid_request'));
     });
 
     test(
@@ -109,10 +110,11 @@ void main() {
             authorizationHeader: header,
             isHttps: true,
           );
-          expect(res.isValid, isFalse);
-          expect(res.statusCode, equals(401));
-          expect(res.errorCode, isNull);
-          expect(res.headers['WWW-Authenticate'], equals('Bearer'));
+          expect(res, isA<BearerTokenInvalid>());
+          final invalid = res as BearerTokenInvalid;
+          expect(invalid.statusCode, equals(401));
+          expect(invalid.errorCode, isNull);
+          expect(invalid.headers['WWW-Authenticate'], equals('Bearer'));
         }
       },
     );
@@ -126,9 +128,11 @@ void main() {
           realm: 'api.example.com',
         );
         final res = await realmValidator.validate(isHttps: true);
-        expect(res.statusCode, equals(401));
+        expect(res, isA<BearerTokenInvalid>());
+        final invalid = res as BearerTokenInvalid;
+        expect(invalid.statusCode, equals(401));
         expect(
-          res.headers['WWW-Authenticate'],
+          invalid.headers['WWW-Authenticate'],
           equals('Bearer realm="api.example.com"'),
         );
 
@@ -153,11 +157,12 @@ void main() {
           ],
           isHttps: true,
         );
-        expect(res.isValid, isFalse);
-        expect(res.statusCode, equals(400));
-        expect(res.errorCode, equals('invalid_request'));
+        expect(res, isA<BearerTokenInvalid>());
+        final invalid = res as BearerTokenInvalid;
+        expect(invalid.statusCode, equals(400));
+        expect(invalid.errorCode, equals('invalid_request'));
         expect(
-          res.headers['WWW-Authenticate'],
+          invalid.headers['WWW-Authenticate'],
           contains('error="invalid_request"'),
         );
       },
@@ -176,11 +181,12 @@ void main() {
             authorizationHeader: badHeader,
             isHttps: true,
           );
-          expect(res.isValid, isFalse);
-          expect(res.statusCode, equals(401));
-          expect(res.errorCode, equals('invalid_token'));
+          expect(res, isA<BearerTokenInvalid>());
+          final invalid = res as BearerTokenInvalid;
+          expect(invalid.statusCode, equals(401));
+          expect(invalid.errorCode, equals('invalid_token'));
           expect(
-            res.headers['WWW-Authenticate'],
+            invalid.headers['WWW-Authenticate'],
             contains('error="invalid_token"'),
           );
         }
@@ -194,8 +200,10 @@ void main() {
           authorizationHeader: 'Bearer unknown-token',
           isHttps: true,
         );
-        expect(resUnknown.statusCode, equals(401));
-        expect(resUnknown.errorCode, equals('invalid_token'));
+        expect(resUnknown, isA<BearerTokenInvalid>());
+        final invalidUnknown = resUnknown as BearerTokenInvalid;
+        expect(invalidUnknown.statusCode, equals(401));
+        expect(invalidUnknown.errorCode, equals('invalid_token'));
 
         await tokenRepo.saveAccessToken(
           AccessToken(
@@ -208,8 +216,10 @@ void main() {
           authorizationHeader: 'Bearer expired-token',
           isHttps: true,
         );
-        expect(resExpired.statusCode, equals(401));
-        expect(resExpired.errorCode, equals('invalid_token'));
+        expect(resExpired, isA<BearerTokenInvalid>());
+        final invalidExpired = resExpired as BearerTokenInvalid;
+        expect(invalidExpired.statusCode, equals(401));
+        expect(invalidExpired.errorCode, equals('invalid_token'));
 
         await tokenRepo.saveAccessToken(
           AccessToken(
@@ -223,8 +233,10 @@ void main() {
           authorizationHeader: 'Bearer revoked-token',
           isHttps: true,
         );
-        expect(resRevoked.statusCode, equals(401));
-        expect(resRevoked.errorCode, equals('invalid_token'));
+        expect(resRevoked, isA<BearerTokenInvalid>());
+        final invalidRevoked = resRevoked as BearerTokenInvalid;
+        expect(invalidRevoked.statusCode, equals(401));
+        expect(invalidRevoked.errorCode, equals('invalid_token'));
       },
     );
 
@@ -236,14 +248,18 @@ void main() {
           requiredScopes: {'read', 'admin'},
           isHttps: true,
         );
-        expect(res.isValid, isFalse);
-        expect(res.statusCode, equals(403));
-        expect(res.errorCode, equals('insufficient_scope'));
+        expect(res, isA<BearerTokenInvalid>());
+        final invalid = res as BearerTokenInvalid;
+        expect(invalid.statusCode, equals(403));
+        expect(invalid.errorCode, equals('insufficient_scope'));
         expect(
-          res.headers['WWW-Authenticate'],
+          invalid.headers['WWW-Authenticate'],
           contains('error="insufficient_scope"'),
         );
-        expect(res.headers['WWW-Authenticate'], contains('scope="read admin"'));
+        expect(
+          invalid.headers['WWW-Authenticate'],
+          contains('scope="read admin"'),
+        );
       },
     );
 
@@ -255,10 +271,10 @@ void main() {
           requiredScopes: {'read', 'write'},
           isHttps: true,
         );
-        expect(res.isValid, isTrue);
-        expect(res.statusCode, equals(200));
-        expect(res.accessToken?.clientId, equals('client-1'));
-        expect(res.accessToken?.userId, equals('user-1'));
+        expect(res, isA<BearerTokenValid>());
+        final valid = res as BearerTokenValid;
+        expect(valid.accessToken.clientId, equals('client-1'));
+        expect(valid.accessToken.userId, equals('user-1'));
       },
     );
   });

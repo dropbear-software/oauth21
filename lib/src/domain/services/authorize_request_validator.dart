@@ -1,66 +1,104 @@
+import 'package:meta/meta.dart';
+
 import '../abnf_validators.dart';
 import '../entities/client_registration.dart';
 import '../ports/client_repository.dart';
 import '../redirect_uri_policy.dart';
 
 /// The result of validating an authorization request.
-class AuthorizeValidationResult {
-  /// Whether the request parameters are valid.
-  final bool isValid;
+///
+/// This is a sealed hierarchy with three outcomes:
+/// - [AuthorizeRequestValid]: The request is valid and ready for user consent.
+/// - [AuthorizeRedirectableError]: The client and redirect URI were verified,
+///   so the error can be safely redirected back to the client.
+/// - [AuthorizeDirectError]: The `client_id` or `redirect_uri` is invalid, so
+///   the error must be rendered directly to the user agent without redirecting.
+@immutable
+sealed class AuthorizeValidationResult {
+  /// Creates an [AuthorizeValidationResult].
+  const AuthorizeValidationResult();
+}
 
-  /// Whether the client redirect URI is validated, allowing the server to
-  /// redirect the user agent back to the client to report validation errors.
-  final bool isRedirectable;
-
-  /// The OAuth 2.1 error code (e.g. invalid_request, invalid_scope, etc.).
-  final String? errorCode;
-
-  /// A human-readable description of the validation error.
-  final String? errorDescription;
-
+/// Represents a valid authorization request ready for user authentication and
+/// consent.
+@immutable
+final class AuthorizeRequestValid extends AuthorizeValidationResult {
   /// The validated client registration.
-  final ClientRegistration? client;
+  final ClientRegistration client;
 
   /// The validated redirect URI.
-  final Uri? validatedRedirectUri;
+  final Uri validatedRedirectUri;
 
-  /// The state parameter passed in the authorization request.
+  /// The optional `state` parameter passed in the authorization request.
   final String? state;
 
   /// The set of validated scopes requested.
   final Set<String> requestedScopes;
 
   /// The PKCE code challenge.
-  final String? codeChallenge;
+  final String codeChallenge;
 
-  /// The PKCE code challenge method (S256 or plain).
-  final String? codeChallengeMethod;
+  /// The PKCE code challenge method (`S256`).
+  final String codeChallengeMethod;
 
-  /// Creates a successful validation result.
-  const AuthorizeValidationResult.valid({
+  /// Creates a valid authorization request result.
+  const AuthorizeRequestValid({
     required this.client,
     required this.validatedRedirectUri,
-    required this.state,
     required this.requestedScopes,
     required this.codeChallenge,
     required this.codeChallengeMethod,
-  }) : isValid = true,
-       isRedirectable = false,
-       errorCode = null,
-       errorDescription = null;
+    this.state,
+  });
+}
 
-  /// Creates a failed validation result.
-  const AuthorizeValidationResult.invalid({
-    required this.isRedirectable,
+/// Represents an authorization request validation error where the client and
+/// redirect URI have been verified, allowing the authorization server to
+/// redirect the user agent back to [validatedRedirectUri] with the error.
+@immutable
+final class AuthorizeRedirectableError extends AuthorizeValidationResult {
+  /// The validated client registration.
+  final ClientRegistration client;
+
+  /// The validated redirect URI to which the error response may be sent.
+  final Uri validatedRedirectUri;
+
+  /// The OAuth 2.1 error code (e.g. `invalid_request`, `invalid_scope`,
+  /// `unauthorized_client`, `unsupported_response_type`).
+  final String errorCode;
+
+  /// A human-readable description of the validation error.
+  final String errorDescription;
+
+  /// The optional validated `state` parameter to echo in the error redirect.
+  final String? state;
+
+  /// Creates a redirectable authorization validation error.
+  const AuthorizeRedirectableError({
+    required this.client,
+    required this.validatedRedirectUri,
     required this.errorCode,
     required this.errorDescription,
-    this.client,
-    this.validatedRedirectUri,
     this.state,
-  }) : isValid = false,
-       requestedScopes = const {},
-       codeChallenge = null,
-       codeChallengeMethod = null;
+  });
+}
+
+/// Represents an authorization request validation error where `client_id` or
+/// `redirect_uri` failed validation, requiring the server to inform the user
+/// agent directly (e.g. HTTP 400) rather than redirecting.
+@immutable
+final class AuthorizeDirectError extends AuthorizeValidationResult {
+  /// The OAuth 2.1 error code (e.g. `invalid_request`, `invalid_client`).
+  final String errorCode;
+
+  /// A human-readable description of the validation error.
+  final String errorDescription;
+
+  /// Creates a non-redirectable authorization validation error.
+  const AuthorizeDirectError({
+    required this.errorCode,
+    required this.errorDescription,
+  });
 }
 
 /// Service that validates incoming parameters at the authorization endpoint.
@@ -78,8 +116,7 @@ class AuthorizeRequestValidator {
     // 1. Parameter Pollution Check for critical parameters
     final clientIds = params['client_id'] ?? [];
     if (clientIds.length > 1) {
-      return const AuthorizeValidationResult.invalid(
-        isRedirectable: false,
+      return const AuthorizeDirectError(
         errorCode: 'invalid_request',
         errorDescription: 'Parameter pollution detected for client_id.',
       );
@@ -87,8 +124,7 @@ class AuthorizeRequestValidator {
 
     final redirectUris = params['redirect_uri'] ?? [];
     if (redirectUris.length > 1) {
-      return const AuthorizeValidationResult.invalid(
-        isRedirectable: false,
+      return const AuthorizeDirectError(
         errorCode: 'invalid_request',
         errorDescription: 'Parameter pollution detected for redirect_uri.',
       );
@@ -97,16 +133,14 @@ class AuthorizeRequestValidator {
     // 2. Client verification (empty value is treated as omitted per Section 3.1)
     final clientId = _singleNonEmptyValue(clientIds);
     if (clientId == null) {
-      return const AuthorizeValidationResult.invalid(
-        isRedirectable: false,
+      return const AuthorizeDirectError(
         errorCode: 'invalid_request',
         errorDescription: 'Missing client_id parameter.',
       );
     }
 
     if (!isValidVscharParam(clientId)) {
-      return const AuthorizeValidationResult.invalid(
-        isRedirectable: false,
+      return const AuthorizeDirectError(
         errorCode: 'invalid_request',
         errorDescription:
             'client_id is empty, untrimmed, or contains invalid characters.',
@@ -115,8 +149,7 @@ class AuthorizeRequestValidator {
 
     final client = await clientRepository.findById(clientId);
     if (client == null) {
-      return const AuthorizeValidationResult.invalid(
-        isRedirectable: false,
+      return const AuthorizeDirectError(
         errorCode: 'invalid_client',
         errorDescription: 'Client registration not found.',
       );
@@ -135,7 +168,7 @@ class AuthorizeRequestValidator {
     return _validateRedirectableParameters(params, client, redirectResult.uri!);
   }
 
-  ({Uri? uri, AuthorizeValidationResult? error}) _resolveRedirectUri(
+  ({Uri? uri, AuthorizeDirectError? error}) _resolveRedirectUri(
     ClientRegistration client,
     String? reqRedirectStr,
   ) {
@@ -143,8 +176,7 @@ class AuthorizeRequestValidator {
       if (client.redirectUris.length != 1) {
         return (
           uri: null,
-          error: const AuthorizeValidationResult.invalid(
-            isRedirectable: false,
+          error: const AuthorizeDirectError(
             errorCode: 'invalid_request',
             errorDescription:
                 'Missing redirect_uri, and client has multiple or zero '
@@ -156,8 +188,7 @@ class AuthorizeRequestValidator {
       if (!isAllowedRedirectUri(defaultUri)) {
         return (
           uri: null,
-          error: const AuthorizeValidationResult.invalid(
-            isRedirectable: false,
+          error: const AuthorizeDirectError(
             errorCode: 'invalid_request',
             errorDescription:
                 'The redirect_uri is not an allowed OAuth 2.1 redirect URI.',
@@ -171,8 +202,7 @@ class AuthorizeRequestValidator {
     if (requestedUri == null) {
       return (
         uri: null,
-        error: const AuthorizeValidationResult.invalid(
-          isRedirectable: false,
+        error: const AuthorizeDirectError(
           errorCode: 'invalid_request',
           errorDescription: 'Malformed redirect_uri parameter.',
         ),
@@ -184,8 +214,7 @@ class AuthorizeRequestValidator {
         !_isRedirectUriAllowed(client, requestedUri, reqRedirectStr)) {
       return (
         uri: null,
-        error: const AuthorizeValidationResult.invalid(
-          isRedirectable: false,
+        error: const AuthorizeDirectError(
           errorCode: 'invalid_request',
           errorDescription:
               'Requested redirect_uri is not registered for this client.',
@@ -205,36 +234,33 @@ class AuthorizeRequestValidator {
     // validatedRedirectUri. Extract and validate optional "state" (Section 4.1.1).
     final states = params['state'] ?? const [];
     if (states.length > 1) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'Parameter pollution detected for state.',
+      return AuthorizeRedirectableError(
         client: client,
         validatedRedirectUri: validatedRedirectUri,
+        errorCode: 'invalid_request',
+        errorDescription: 'Parameter pollution detected for state.',
       );
     }
 
     final state = _singleNonEmptyValue(states);
     if (state != null && !isValidVscharParam(state)) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'state is untrimmed or contains invalid characters.',
+      return AuthorizeRedirectableError(
         client: client,
         validatedRedirectUri: validatedRedirectUri,
+        errorCode: 'invalid_request',
+        errorDescription: 'state is untrimmed or contains invalid characters.',
       );
     }
 
     // Parameter pollution check for remaining fields
     for (final entry in params.entries) {
       if (entry.value.length > 1) {
-        return AuthorizeValidationResult.invalid(
-          isRedirectable: true,
+        return AuthorizeRedirectableError(
+          client: client,
+          validatedRedirectUri: validatedRedirectUri,
           errorCode: 'invalid_request',
           errorDescription:
               'Parameter pollution detected for key: ${entry.key}.',
-          client: client,
-          validatedRedirectUri: validatedRedirectUri,
           state: state,
         );
       }
@@ -242,14 +268,13 @@ class AuthorizeRequestValidator {
 
     // Verify client is authorized for the authorization_code grant (Section 4.1.2.1)
     if (!client.allowedGrantTypes.contains('authorization_code')) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
+      return AuthorizeRedirectableError(
+        client: client,
+        validatedRedirectUri: validatedRedirectUri,
         errorCode: 'unauthorized_client',
         errorDescription:
             'The client is not authorized to request an authorization code '
             'using this method.',
-        client: client,
-        validatedRedirectUri: validatedRedirectUri,
         state: state,
       );
     }
@@ -257,22 +282,20 @@ class AuthorizeRequestValidator {
     // Validate response_type
     final responseType = _singleNonEmptyValue(params['response_type']);
     if (responseType == null) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'Missing response_type parameter.',
+      return AuthorizeRedirectableError(
         client: client,
         validatedRedirectUri: validatedRedirectUri,
+        errorCode: 'invalid_request',
+        errorDescription: 'Missing response_type parameter.',
         state: state,
       );
     }
     if (responseType != 'code') {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'unsupported_response_type',
-        errorDescription: 'response_type must be strictly "code".',
+      return AuthorizeRedirectableError(
         client: client,
         validatedRedirectUri: validatedRedirectUri,
+        errorCode: 'unsupported_response_type',
+        errorDescription: 'response_type must be strictly "code".',
         state: state,
       );
     }
@@ -280,12 +303,11 @@ class AuthorizeRequestValidator {
     // Validate PKCE (code_challenge and code_challenge_method are mandatory)
     final pkce = _validatePkceParameters(params);
     if (pkce.errorDescription != null) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: pkce.errorDescription,
+      return AuthorizeRedirectableError(
         client: client,
         validatedRedirectUri: validatedRedirectUri,
+        errorCode: 'invalid_request',
+        errorDescription: pkce.errorDescription!,
         state: state,
       );
     }
@@ -296,17 +318,16 @@ class AuthorizeRequestValidator {
       _singleNonEmptyValue(params['scope']),
     );
     if (scopeResult.errorDescription != null) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_scope',
-        errorDescription: scopeResult.errorDescription,
+      return AuthorizeRedirectableError(
         client: client,
         validatedRedirectUri: validatedRedirectUri,
+        errorCode: 'invalid_scope',
+        errorDescription: scopeResult.errorDescription!,
         state: state,
       );
     }
 
-    return AuthorizeValidationResult.valid(
+    return AuthorizeRequestValid(
       client: client,
       validatedRedirectUri: validatedRedirectUri,
       state: state,

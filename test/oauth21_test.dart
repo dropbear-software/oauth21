@@ -384,17 +384,17 @@ void main() {
             await authCodeRepo.save(
               AuthCode(
                 code: issuedCode,
-                clientId: result.client!.clientId,
-                redirectUri: result.validatedRedirectUri!,
+                clientId: result.client.clientId,
+                redirectUri: result.validatedRedirectUri,
                 userId: 'user-e2e',
-                codeChallenge: result.codeChallenge!,
-                codeChallengeMethod: result.codeChallengeMethod!,
+                codeChallenge: result.codeChallenge,
+                codeChallengeMethod: result.codeChallengeMethod,
                 expiresAt: DateTime.now().add(const Duration(minutes: 5)),
                 scope: result.requestedScopes.join(' '),
               ),
             );
             return redirectWithAuthorizationCode(
-              redirectUri: result.validatedRedirectUri!,
+              redirectUri: result.validatedRedirectUri,
               code: issuedCode,
               issuer: 'https://auth.example.com',
               state: result.state,

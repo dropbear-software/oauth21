@@ -56,21 +56,21 @@ void main() async {
           // Save authorization code details to the repository
           final authCode = AuthCode(
             code: code,
-            clientId: validationResult.client!.clientId,
-            redirectUri: validationResult.validatedRedirectUri!,
+            clientId: validationResult.client.clientId,
+            redirectUri: validationResult.validatedRedirectUri,
             expiresAt: DateTime.now().add(const Duration(minutes: 5)),
             userId: 'user-42',
             scope: validationResult.requestedScopes.join(' '),
-            codeChallenge: validationResult.codeChallenge!,
-            codeChallengeMethod: validationResult.codeChallengeMethod!,
+            codeChallenge: validationResult.codeChallenge,
+            codeChallengeMethod: validationResult.codeChallengeMethod,
           );
           await authCodeRepo.save(authCode);
 
           // Redirect back with the code
           return redirectWithAuthorizationCode(
-            redirectUri: validationResult.validatedRedirectUri!,
+            redirectUri: validationResult.validatedRedirectUri,
             code: code,
-            state: validationResult.state!,
+            state: validationResult.state,
             issuer: 'http://localhost:8080',
           );
         },

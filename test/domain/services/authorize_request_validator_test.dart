@@ -65,30 +65,31 @@ void main() {
       final params = createParams();
       final result = await validator.validate(params);
 
-      expect(result.isValid, isTrue);
-      expect(result.client?.clientId, equals('client-123'));
+      expect(result, isA<AuthorizeRequestValid>());
+      final valid = result as AuthorizeRequestValid;
+      expect(valid.client.clientId, equals('client-123'));
       expect(
-        result.validatedRedirectUri,
+        valid.validatedRedirectUri,
         equals(Uri.parse('https://example.com/cb')),
       );
-      expect(result.state, equals('state-xyz'));
-      expect(result.requestedScopes, contains('read'));
+      expect(valid.state, equals('state-xyz'));
+      expect(valid.requestedScopes, contains('read'));
       expect(
-        result.codeChallenge,
+        valid.codeChallenge,
         equals('challengechallengechallengechallengechallenge'),
       );
-      expect(result.codeChallengeMethod, equals('S256'));
+      expect(valid.codeChallengeMethod, equals('S256'));
     });
 
     test('should reject code_challenge_method plain (redirectable)', () async {
       final params = createParams(codeChallengeMethod: 'plain');
       final result = await validator.validate(params);
 
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_request'));
       expect(
-        result.errorDescription,
+        err.errorDescription,
         equals('The code_challenge_method must be "S256".'),
       );
     });
@@ -108,12 +109,12 @@ void main() {
           final params = createParams(redirectUri: badRedirect);
           final result = await validator.validate(params);
           expect(
-            result.isValid,
-            isFalse,
+            result,
+            isA<AuthorizeDirectError>(),
             reason: 'Expected $badRedirect to be rejected',
           );
-          expect(result.isRedirectable, isFalse);
-          expect(result.errorCode, equals('invalid_request'));
+          final err = result as AuthorizeDirectError;
+          expect(err.errorCode, equals('invalid_request'));
         }
       },
     );
@@ -135,9 +136,10 @@ void main() {
         );
         final result = await validator.validate(params);
 
-        expect(result.isValid, isTrue);
+        expect(result, isA<AuthorizeRequestValid>());
+        final valid = result as AuthorizeRequestValid;
         expect(
-          result.validatedRedirectUri,
+          valid.validatedRedirectUri,
           equals(Uri.parse('https://example.com/single')),
         );
       },
@@ -147,9 +149,10 @@ void main() {
       final params = createParams(redirectUri: 'http://127.0.0.1:9999/cb');
       final result = await validator.validate(params);
 
-      expect(result.isValid, isTrue);
+      expect(result, isA<AuthorizeRequestValid>());
+      final valid = result as AuthorizeRequestValid;
       expect(
-        result.validatedRedirectUri,
+        valid.validatedRedirectUri,
         equals(Uri.parse('http://127.0.0.1:9999/cb')),
       );
     });
@@ -158,9 +161,10 @@ void main() {
       final params = createParams(redirectUri: 'http://[::1]:9999/cb');
       final result = await validator.validate(params);
 
-      expect(result.isValid, isTrue);
+      expect(result, isA<AuthorizeRequestValid>());
+      final valid = result as AuthorizeRequestValid;
       expect(
-        result.validatedRedirectUri,
+        valid.validatedRedirectUri,
         equals(Uri.parse('http://[::1]:9999/cb')),
       );
     });
@@ -169,9 +173,10 @@ void main() {
       final params = createParams(redirectUri: 'http://localhost:9999/cb');
       final result = await validator.validate(params);
 
-      expect(result.isValid, isTrue);
+      expect(result, isA<AuthorizeRequestValid>());
+      final valid = result as AuthorizeRequestValid;
       expect(
-        result.validatedRedirectUri,
+        valid.validatedRedirectUri,
         equals(Uri.parse('http://localhost:9999/cb')),
       );
     });
@@ -181,9 +186,9 @@ void main() {
       params['client_id'] = ['client-123', 'client-456'];
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test('should reject duplicate redirect_uri (non-redirectable)', () async {
@@ -191,36 +196,36 @@ void main() {
       params['redirect_uri'] = ['https://example.com/cb', 'https://attack.com'];
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test('should reject missing client_id (non-redirectable)', () async {
       final params = createParams(clientId: null);
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test('should reject untrimmed client_id (non-redirectable)', () async {
       final params = createParams(clientId: 'client-123 ');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test('should reject non-existent client (non-redirectable)', () async {
       final params = createParams(clientId: 'non-existent');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_client'));
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_client'));
     });
 
     test(
@@ -229,9 +234,9 @@ void main() {
         final params = createParams(redirectUri: null);
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isFalse);
-        expect(result.errorCode, equals('invalid_request'));
+        expect(result, isA<AuthorizeDirectError>());
+        final err = result as AuthorizeDirectError;
+        expect(err.errorCode, equals('invalid_request'));
       },
     );
 
@@ -239,13 +244,10 @@ void main() {
       final params = createParams(redirectUri: 'http://example.com:abc');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_request'));
-      expect(
-        result.errorDescription,
-        equals('Malformed redirect_uri parameter.'),
-      );
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_request'));
+      expect(err.errorDescription, equals('Malformed redirect_uri parameter.'));
     });
 
     test(
@@ -254,9 +256,9 @@ void main() {
         final params = createParams(redirectUri: 'https://unregistered.com/cb');
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isFalse);
-        expect(result.errorCode, equals('invalid_request'));
+        expect(result, isA<AuthorizeDirectError>());
+        final err = result as AuthorizeDirectError;
+        expect(err.errorCode, equals('invalid_request'));
       },
     );
 
@@ -266,9 +268,9 @@ void main() {
         final params = createParams(redirectUri: 'http://127.0.0.2:8000/cb');
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isFalse);
-        expect(result.errorCode, equals('invalid_request'));
+        expect(result, isA<AuthorizeDirectError>());
+        final err = result as AuthorizeDirectError;
+        expect(err.errorCode, equals('invalid_request'));
       },
     );
 
@@ -277,10 +279,10 @@ void main() {
       params['state'] = ['state-1', 'state-2'];
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
-      expect(result.state, isNull);
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_request'));
+      expect(err.state, isNull);
     });
 
     test(
@@ -288,15 +290,15 @@ void main() {
       () async {
         final omittedStateParams = createParams(state: null);
         final omittedResult = await validator.validate(omittedStateParams);
-        expect(omittedResult.isValid, isTrue);
-        expect(omittedResult.state, isNull);
+        expect(omittedResult, isA<AuthorizeRequestValid>());
+        expect((omittedResult as AuthorizeRequestValid).state, isNull);
 
         final emptyStateParams = Map<String, List<String>>.unmodifiable(
           createParams(state: ''),
         );
         final emptyResult = await validator.validate(emptyStateParams);
-        expect(emptyResult.isValid, isTrue);
-        expect(emptyResult.state, isNull);
+        expect(emptyResult, isA<AuthorizeRequestValid>());
+        expect((emptyResult as AuthorizeRequestValid).state, isNull);
       },
     );
 
@@ -304,9 +306,9 @@ void main() {
       final params = createParams(state: 'state-xyz ');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test(
@@ -316,10 +318,10 @@ void main() {
         params['response_type'] = ['code', 'token'];
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isTrue);
-        expect(result.errorCode, equals('invalid_request'));
-        expect(result.state, equals('state-xyz'));
+        expect(result, isA<AuthorizeRedirectableError>());
+        final err = result as AuthorizeRedirectableError;
+        expect(err.errorCode, equals('invalid_request'));
+        expect(err.state, equals('state-xyz'));
       },
     );
 
@@ -327,36 +329,36 @@ void main() {
       final params = createParams(responseType: null);
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test('should reject unsupported response_type (redirectable)', () async {
       final params = createParams(responseType: 'token');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('unsupported_response_type'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('unsupported_response_type'));
     });
 
     test('should reject missing code_challenge (redirectable)', () async {
       final params = createParams(codeChallenge: null);
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test('should reject malformed code_challenge (redirectable)', () async {
       final params = createParams(codeChallenge: 'too-short');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test(
@@ -365,9 +367,9 @@ void main() {
         final params = createParams(codeChallengeMethod: null);
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isTrue);
-        expect(result.errorCode, equals('invalid_request'));
+        expect(result, isA<AuthorizeRedirectableError>());
+        final err = result as AuthorizeRedirectableError;
+        expect(err.errorCode, equals('invalid_request'));
       },
     );
 
@@ -377,9 +379,9 @@ void main() {
         final params = createParams(codeChallengeMethod: 'MD5');
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isTrue);
-        expect(result.errorCode, equals('invalid_request'));
+        expect(result, isA<AuthorizeRedirectableError>());
+        final err = result as AuthorizeRedirectableError;
+        expect(err.errorCode, equals('invalid_request'));
       },
     );
 
@@ -387,9 +389,9 @@ void main() {
       final params = createParams(scope: 'read  write');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_scope'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_scope'));
     });
 
     test(
@@ -398,9 +400,9 @@ void main() {
         final params = createParams(scope: 'read write"');
 
         final result = await validator.validate(params);
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isTrue);
-        expect(result.errorCode, equals('invalid_scope'));
+        expect(result, isA<AuthorizeRedirectableError>());
+        final err = result as AuthorizeRedirectableError;
+        expect(err.errorCode, equals('invalid_scope'));
       },
     );
 
@@ -408,9 +410,9 @@ void main() {
       final params = createParams(scope: 'read admin');
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_scope'));
+      expect(result, isA<AuthorizeRedirectableError>());
+      final err = result as AuthorizeRedirectableError;
+      expect(err.errorCode, equals('invalid_scope'));
     });
 
     test(
@@ -419,8 +421,9 @@ void main() {
         final params = createParams(scope: null);
 
         final result = await validator.validate(params);
-        expect(result.isValid, isTrue);
-        expect(result.requestedScopes, equals(testClient.allowedScopes));
+        expect(result, isA<AuthorizeRequestValid>());
+        final valid = result as AuthorizeRequestValid;
+        expect(valid.requestedScopes, equals(testClient.allowedScopes));
       },
     );
 
@@ -431,9 +434,9 @@ void main() {
       );
 
       final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isFalse);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result, isA<AuthorizeDirectError>());
+      final err = result as AuthorizeDirectError;
+      expect(err.errorCode, equals('invalid_request'));
     });
 
     test(
@@ -454,12 +457,12 @@ void main() {
           final params = createParams(redirectUri: badRedirect);
           final result = await validator.validate(params);
           expect(
-            result.isValid,
-            isFalse,
+            result,
+            isA<AuthorizeDirectError>(),
             reason: 'Expected $badRedirect to be rejected',
           );
-          expect(result.isRedirectable, isFalse);
-          expect(result.errorCode, equals('invalid_request'));
+          final err = result as AuthorizeDirectError;
+          expect(err.errorCode, equals('invalid_request'));
         }
       },
     );
@@ -480,10 +483,10 @@ void main() {
         final params = createParams(clientId: 'client-cc-only');
         final result = await validator.validate(params);
 
-        expect(result.isValid, isFalse);
-        expect(result.isRedirectable, isTrue);
-        expect(result.errorCode, equals('unauthorized_client'));
-        expect(result.state, equals('state-xyz'));
+        expect(result, isA<AuthorizeRedirectableError>());
+        final err = result as AuthorizeRedirectableError;
+        expect(err.errorCode, equals('unauthorized_client'));
+        expect(err.state, equals('state-xyz'));
       },
     );
 
@@ -508,13 +511,14 @@ void main() {
         );
 
         final result = await validator.validate(params);
-        expect(result.isValid, isTrue);
+        expect(result, isA<AuthorizeRequestValid>());
+        final valid = result as AuthorizeRequestValid;
         expect(
-          result.validatedRedirectUri,
+          valid.validatedRedirectUri,
           equals(Uri.parse('https://example.com/single')),
         );
-        expect(result.state, isNull);
-        expect(result.requestedScopes, equals({'read', 'write'}));
+        expect(valid.state, isNull);
+        expect(valid.requestedScopes, equals({'read', 'write'}));
       },
     );
 
@@ -530,15 +534,15 @@ void main() {
       final upperResult = await validator.validate(upperCaseLocalhostParams);
       final mixedResult = await validator.validate(mixedCaseLocalhostParams);
 
-      expect(upperResult.isValid, isTrue);
+      expect(upperResult, isA<AuthorizeRequestValid>());
       expect(
-        upperResult.validatedRedirectUri,
+        (upperResult as AuthorizeRequestValid).validatedRedirectUri,
         equals(Uri.parse('http://LOCALHOST:9999/cb')),
       );
 
-      expect(mixedResult.isValid, isTrue);
+      expect(mixedResult, isA<AuthorizeRequestValid>());
       expect(
-        mixedResult.validatedRedirectUri,
+        (mixedResult as AuthorizeRequestValid).validatedRedirectUri,
         equals(Uri.parse('http://LocalHost:9999/cb')),
       );
     });
