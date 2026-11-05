@@ -204,12 +204,53 @@ void main() {
           throwsArgumentError,
         );
       });
+
+      test(
+        'should accept valid grant-name and absolute URI allowedGrantTypes and '
+        'reject malformed grant types (Appendix A.10 & Section 6.3)',
+        () {
+          final validClient = ClientRegistration(
+            clientId: 'client-123',
+            clientType: ClientType.confidential,
+            clientSecretHash: 'hash',
+            redirectUris: {Uri.parse('https://example.com/cb')},
+            allowedGrantTypes: {
+              'authorization_code',
+              'refresh_token',
+              'urn:ietf:params:oauth:grant-type:jwt-bearer',
+              'https://example.com/grants/custom',
+            },
+          );
+          expect(validClient.allowedGrantTypes.length, equals(4));
+
+          for (final badGrant in [
+            '',
+            r'bad!grant$type',
+            'relative/path/grant',
+            'https://example.com/grant#fragment',
+            'https://example.com/grant with space',
+          ]) {
+            expect(
+              () => ClientRegistration(
+                clientId: 'client-123',
+                clientType: ClientType.confidential,
+                clientSecretHash: 'hash',
+                redirectUris: {Uri.parse('https://example.com/cb')},
+                allowedGrantTypes: {badGrant},
+              ),
+              throwsArgumentError,
+              reason: 'Expected grantType "$badGrant" to be rejected',
+            );
+          }
+        },
+      );
     });
 
     group('AuthCode', () {
       final now = DateTime.now();
       final future = now.add(const Duration(minutes: 10));
       final past = now.subtract(const Duration(minutes: 10));
+      final validChallenge = 'A' * 43;
 
       test('should check isExpired correctly', () {
         final activeCode = AuthCode(
@@ -217,7 +258,7 @@ void main() {
           clientId: 'client-1',
           redirectUri: Uri.parse('https://example.com/cb'),
           userId: 'user-1',
-          codeChallenge: 'challenge-1',
+          codeChallenge: validChallenge,
           codeChallengeMethod: 'S256',
           expiresAt: future,
         );
@@ -227,7 +268,7 @@ void main() {
           clientId: 'client-2',
           redirectUri: Uri.parse('https://example.com/cb'),
           userId: 'user-2',
-          codeChallenge: 'challenge-2',
+          codeChallenge: validChallenge,
           codeChallengeMethod: 'S256',
           expiresAt: past,
         );
@@ -244,7 +285,7 @@ void main() {
             clientId: 'client-1',
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
             expiresAt: future,
           ),
@@ -259,7 +300,7 @@ void main() {
             clientId: 'client-1',
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
             expiresAt: future,
           ),
@@ -274,7 +315,7 @@ void main() {
             clientId: 'client-1',
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
             expiresAt: future,
           ),
@@ -289,7 +330,7 @@ void main() {
             clientId: '   ', // Whitespace
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
             expiresAt: future,
           ),
@@ -301,7 +342,7 @@ void main() {
             clientId: 'client-1 ', // Trailing space
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
             expiresAt: future,
           ),
@@ -313,8 +354,50 @@ void main() {
             clientId: 'client\nid', // Invalid characters
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
+            expiresAt: future,
+          ),
+          throwsArgumentError,
+        );
+      });
+
+      test('should reject invalid userId, codeChallenge, or scope', () {
+        expect(
+          () => AuthCode(
+            code: 'valid-code-123',
+            clientId: 'client-1',
+            redirectUri: Uri.parse('https://example.com/cb'),
+            userId: '   ',
+            codeChallenge: validChallenge,
+            codeChallengeMethod: 'S256',
+            expiresAt: future,
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => AuthCode(
+            code: 'valid-code-123',
+            clientId: 'client-1',
+            redirectUri: Uri.parse('https://example.com/cb'),
+            userId: 'user-1',
+            codeChallenge: 'too-short',
+            codeChallengeMethod: 'S256',
+            expiresAt: future,
+          ),
+          throwsArgumentError,
+        );
+
+        expect(
+          () => AuthCode(
+            code: 'valid-code-123',
+            clientId: 'client-1',
+            redirectUri: Uri.parse('https://example.com/cb'),
+            userId: 'user-1',
+            codeChallenge: validChallenge,
+            codeChallengeMethod: 'S256',
+            scope: 'read  write',
             expiresAt: future,
           ),
           throwsArgumentError,
@@ -328,7 +411,7 @@ void main() {
             clientId: 'client-1',
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'MD5', // Unsupported signature method
             expiresAt: future,
           ),
@@ -340,7 +423,7 @@ void main() {
             clientId: 'client-1',
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'plain', // Removed in OAuth 2.1
             expiresAt: future,
           ),
@@ -354,8 +437,9 @@ void main() {
           clientId: 'client-1',
           redirectUri: Uri.parse('https://example.com/cb'),
           userId: 'user-1',
-          codeChallenge: 'challenge-1',
+          codeChallenge: validChallenge,
           codeChallengeMethod: 'S256',
+          scope: 'read write',
           expiresAt: future,
         );
 
@@ -387,7 +471,7 @@ void main() {
             clientId: 'client-1',
             redirectUri: Uri.parse('https://example.com/cb'),
             userId: 'user-1',
-            codeChallenge: 'challenge-1',
+            codeChallenge: validChallenge,
             codeChallengeMethod: 'S256',
             expiresAt: future,
           );

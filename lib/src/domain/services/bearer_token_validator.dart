@@ -46,13 +46,19 @@ final class BearerTokenInvalid extends BearerValidationResult {
   /// Human-readable description of the error, if any.
   final String? errorDescription;
 
+  /// Optional URI identifying a human-readable web page with information about
+  /// the error (OAuth 2.1 Section 5.3.1).
+  final String? errorUri;
+
   /// Creates a failed [BearerTokenInvalid] result with the specified HTTP
-  /// [statusCode], [headers], and optional [errorCode] / [errorDescription].
+  /// [statusCode], [headers], and optional [errorCode], [errorDescription],
+  /// and [errorUri].
   const BearerTokenInvalid({
     required this.statusCode,
     required this.headers,
     this.errorCode,
     this.errorDescription,
+    this.errorUri,
   });
 }
 
@@ -60,7 +66,7 @@ final class BearerTokenInvalid extends BearerValidationResult {
 /// accordance with OAuth 2.1 Section 5.
 class BearerTokenValidator {
   static final RegExp _bearerSchemePrefixRegex = RegExp(
-    r'^[Bb][Ee][Aa][Rr][Ee][Rr](?:\s+|$)',
+    r'^[Bb][Ee][Aa][Rr][Ee][Rr]\s+',
   );
 
   /// Repository used to look up stored access tokens by hash.
@@ -73,19 +79,32 @@ class BearerTokenValidator {
   /// challenge headers.
   final String? realm;
 
+  /// Optional URI (`error_uri`) included in `WWW-Authenticate` challenge
+  /// headers and error responses when an error code is emitted (Section 5.3.1).
+  final String? errorUri;
+
   /// Creates a [BearerTokenValidator].
   ///
-  /// Throws [ArgumentError] if [realm] is provided and violates `NQSCHAR` ABNF.
+  /// Throws [ArgumentError] if [realm] is provided and violates `NQSCHAR` ABNF,
+  /// or if [errorUri] is provided and violates `error-uri` ABNF (Appendix A.9).
   BearerTokenValidator({
     required this.tokenRepository,
     required this.cryptoService,
     this.realm,
+    this.errorUri,
   }) {
     if (realm != null && !nqscharRequiredRegex.hasMatch(realm!)) {
       throw ArgumentError.value(
         realm,
         'realm',
         'realm must be a non-empty string conforming to NQSCHAR ABNF.',
+      );
+    }
+    if (errorUri != null && !isValidErrorUri(errorUri!)) {
+      throw ArgumentError.value(
+        errorUri,
+        'errorUri',
+        'errorUri must be a valid URI reference conforming to error-uri ABNF.',
       );
     }
   }
@@ -99,6 +118,7 @@ class BearerTokenValidator {
       if (realm != null) 'realm="$realm"',
       if (errorCode != null) 'error="$errorCode"',
       if (errorDescription != null) 'error_description="$errorDescription"',
+      if (errorCode != null && errorUri != null) 'error_uri="$errorUri"',
       if (scope != null) 'scope="$scope"',
     ];
     if (attributes.isEmpty) {
@@ -129,6 +149,7 @@ class BearerTokenValidator {
       statusCode: statusCode,
       errorCode: errorCode,
       errorDescription: errorDescription,
+      errorUri: errorUri,
       headers: _errorHeaders(
         wwwAuthenticate: _buildWwwAuthenticate(
           errorCode: errorCode,
@@ -213,7 +234,7 @@ class BearerTokenValidator {
 
     // 4. Extract raw token and enforce token68 ABNF (Section 5.1.1)
     final rawToken = effectiveHeader.trim().substring(6).trim();
-    if (rawToken.isEmpty || !token68Regex.hasMatch(rawToken)) {
+    if (!token68Regex.hasMatch(rawToken)) {
       return _bearerError(
         statusCode: 401,
         errorCode: 'invalid_token',

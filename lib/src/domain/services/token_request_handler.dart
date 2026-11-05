@@ -96,10 +96,17 @@ class TokenRequestHandler {
 
     final client = await clientRepository.findById(credentials.clientId!);
     if (client == null) {
-      return _invalidClient('Client registration not found.');
+      return _invalidClient(
+        'Client registration not found.',
+        includeWwwAuthenticate: credentials.usedAuthorizationHeader,
+      );
     }
 
-    final authError = _verifyClientSecret(client, credentials.clientSecret);
+    final authError = _verifyClientSecret(
+      client,
+      credentials.clientSecret,
+      usedAuthorizationHeader: credentials.usedAuthorizationHeader,
+    );
     if (authError != null) {
       return authError;
     }
@@ -108,6 +115,10 @@ class TokenRequestHandler {
     final grantType = body['grant_type'];
     if (grantType == null) {
       return _badRequest('Missing grant_type parameter.');
+    }
+
+    if (!isValidGrantTypeParam(grantType)) {
+      return _badRequest('Malformed grant_type parameter.');
     }
 
     if (!client.allowedGrantTypes.contains(grantType)) {
@@ -141,8 +152,9 @@ class TokenRequestHandler {
 
   ServerTokenResponse? _verifyClientSecret(
     ClientRegistration client,
-    String? clientSecret,
-  ) {
+    String? clientSecret, {
+    required bool usedAuthorizationHeader,
+  }) {
     if (client.clientType == ClientType.confidential) {
       if (clientSecret == null) {
         return _invalidClient('Client credentials required.');
@@ -150,7 +162,10 @@ class TokenRequestHandler {
       final registeredHash = client.clientSecretHash;
       if (registeredHash == null ||
           !cryptoService.verifyPasswordHash(clientSecret, registeredHash)) {
-        return _invalidClient('Client authentication failed.');
+        return _invalidClient(
+          'Client authentication failed.',
+          includeWwwAuthenticate: usedAuthorizationHeader,
+        );
       }
     } else if (clientSecret != null) {
       // Public clients must not use a secret
@@ -166,25 +181,46 @@ class TokenRequestHandler {
         headers: _headers,
       );
 
-  static ServerTokenResponse _invalidClient(String description) =>
-      ServerTokenResponse(
-        statusCode: 401,
-        body: {'error': 'invalid_client', 'error_description': description},
-        headers: _unauthorizedHeaders,
-      );
+  static ServerTokenResponse _invalidClient(
+    String description, {
+    bool includeWwwAuthenticate = true,
+  }) => ServerTokenResponse(
+    statusCode: includeWwwAuthenticate ? 401 : 400,
+    body: {'error': 'invalid_client', 'error_description': description},
+    headers: includeWwwAuthenticate ? _unauthorizedHeaders : _headers,
+  );
 
-  static ({String? clientId, String? clientSecret, ServerTokenResponse? error})
-  _credentialsError(ServerTokenResponse error) =>
-      (clientId: null, clientSecret: null, error: error);
+  static ({
+    String? clientId,
+    String? clientSecret,
+    bool usedAuthorizationHeader,
+    ServerTokenResponse? error,
+  })
+  _credentialsError(
+    ServerTokenResponse error, {
+    bool usedAuthorizationHeader = false,
+  }) => (
+    clientId: null,
+    clientSecret: null,
+    usedAuthorizationHeader: usedAuthorizationHeader,
+    error: error,
+  );
 
-  static ({String? clientId, String? clientSecret, ServerTokenResponse? error})
+  static ({
+    String? clientId,
+    String? clientSecret,
+    bool usedAuthorizationHeader,
+    ServerTokenResponse? error,
+  })
   _extractClientCredentials(
     Map<String, String> body,
     String? authorizationHeader,
   ) {
+    final usedHeader =
+        authorizationHeader != null && authorizationHeader.trim().isNotEmpty;
     String? basicClientId;
     String? basicSecret;
-    if (authorizationHeader != null && authorizationHeader.trim().isNotEmpty) {
+    if (usedHeader) {
       final basic = _parseBasicAuthorization(authorizationHeader.trim());
       if (basic.error != null) {
         return basic;
@@ -199,6 +235,7 @@ class TokenRequestHandler {
     if (basicClientId != null && bodySecret != null) {
       return _credentialsError(
         _badRequest('Multiple client authentication methods attempted.'),
+        usedAuthorizationHeader: true,
       );
     }
 
@@ -209,6 +246,7 @@ class TokenRequestHandler {
         _badRequest(
           'Conflicting client_id in Authorization header and request body.',
         ),
+        usedAuthorizationHeader: true,
       );
     }
 
@@ -229,14 +267,25 @@ class TokenRequestHandler {
       );
     }
 
-    return (clientId: clientId, clientSecret: clientSecret, error: null);
+    return (
+      clientId: clientId,
+      clientSecret: clientSecret,
+      usedAuthorizationHeader: usedHeader,
+      error: null,
+    );
   }
 
-  static ({String? clientId, String? clientSecret, ServerTokenResponse? error})
+  static ({
+    String? clientId,
+    String? clientSecret,
+    bool usedAuthorizationHeader,
+    ServerTokenResponse? error,
+  })
   _parseBasicAuthorization(String trimmedHeader) {
     if (!_basicSchemePrefix.hasMatch(trimmedHeader)) {
       return _credentialsError(
         _invalidClient('Unsupported Authorization header scheme.'),
+        usedAuthorizationHeader: true,
       );
     }
 
@@ -249,6 +298,7 @@ class TokenRequestHandler {
       if (parts.length != 2 || parts[0].isEmpty) {
         return _credentialsError(
           _invalidClient('Malformed Authorization header.'),
+          usedAuthorizationHeader: true,
         );
       }
       final clientId = Uri.decodeQueryComponent(parts[0]);
@@ -259,12 +309,19 @@ class TokenRequestHandler {
           _invalidClient(
             'Client credentials in Authorization header violate VSCHAR syntax.',
           ),
+          usedAuthorizationHeader: true,
         );
       }
-      return (clientId: clientId, clientSecret: clientSecret, error: null);
+      return (
+        clientId: clientId,
+        clientSecret: clientSecret,
+        usedAuthorizationHeader: true,
+        error: null,
+      );
     } on Object catch (_) {
       return _credentialsError(
         _invalidClient('Malformed Authorization header.'),
+        usedAuthorizationHeader: true,
       );
     }
   }
@@ -393,7 +450,7 @@ class TokenRequestHandler {
     final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: authCode.userId,
-      scope: authCode.scope,
+      accessScope: authCode.scope,
       issueRefreshToken: client.allowedGrantTypes.contains('refresh_token'),
       authorizationCode: authCode.code,
     );
@@ -437,7 +494,7 @@ class TokenRequestHandler {
     final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: null,
-      scope: scopeResult.scope,
+      accessScope: scopeResult.scope,
       issueRefreshToken: false,
     );
     await tokenRepository.saveAccessToken(pair.accessToken);
@@ -531,7 +588,8 @@ class TokenRequestHandler {
     final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: oldRefreshToken.userId,
-      scope: scopeResult.scope,
+      accessScope: scopeResult.scope,
+      refreshScope: oldRefreshToken.scope,
       issueRefreshToken: true,
       authorizationCode: oldRefreshToken.authorizationCode,
       refreshExpiresAt: oldRefreshToken.expiresAt,
@@ -636,8 +694,9 @@ class TokenRequestHandler {
   _buildTokenPair({
     required String clientId,
     required String? userId,
-    required String? scope,
+    required String? accessScope,
     required bool issueRefreshToken,
+    String? refreshScope,
     String? authorizationCode,
     DateTime? refreshExpiresAt,
   }) {
@@ -650,7 +709,7 @@ class TokenRequestHandler {
       clientId: clientId,
       expiresAt: accessExpiresAt,
       userId: userId,
-      scope: scope,
+      scope: accessScope,
       authorizationCode: authorizationCode,
     );
 
@@ -667,7 +726,7 @@ class TokenRequestHandler {
         clientId: clientId,
         expiresAt: effectiveRefreshExpiresAt,
         userId: userId,
-        scope: scope,
+        scope: refreshScope ?? accessScope,
         authorizationCode: authorizationCode,
       );
     }
@@ -680,8 +739,8 @@ class TokenRequestHandler {
     if (rawRefreshToken != null) {
       body['refresh_token'] = rawRefreshToken;
     }
-    if (scope != null && scope.isNotEmpty) {
-      body['scope'] = scope;
+    if (accessScope != null && accessScope.isNotEmpty) {
+      body['scope'] = accessScope;
     }
 
     return (

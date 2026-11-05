@@ -104,10 +104,17 @@ void main() {
 
     test(
       'should return 401 with bare WWW-Authenticate: Bearer and no error code '
-      'when Authorization header is missing, empty, or non-Bearer '
+      'when Authorization header is missing, empty, non-Bearer, or bare Bearer '
       '(Section 5.3.1)',
       () async {
-        for (final header in [null, '', '   ', 'Basic dXNlcjpwYXNz']) {
+        for (final header in [
+          null,
+          '',
+          '   ',
+          'Basic dXNlcjpwYXNz',
+          'Bearer',
+          'Bearer   ',
+        ]) {
           final res = await validator.validate(
             authorizationHeader: header,
             isHttps: true,
@@ -116,25 +123,43 @@ void main() {
           final invalid = res as BearerTokenInvalid;
           expect(invalid.statusCode, equals(401));
           expect(invalid.errorCode, isNull);
+          expect(invalid.errorUri, isNull);
           expect(invalid.headers['WWW-Authenticate'], equals('Bearer'));
         }
       },
     );
 
-    test('should include custom realm in WWW-Authenticate header and validate '
-        'realm NQSCHAR ABNF', () async {
+    test('should include custom realm and errorUri in WWW-Authenticate header '
+        'and validate ABNF', () async {
       final realmValidator = BearerTokenValidator(
         tokenRepository: tokenRepo,
         cryptoService: crypto,
         realm: 'api.example.com',
+        errorUri: 'https://api.example.com/docs/errors',
       );
-      final res = await realmValidator.validate(isHttps: true);
-      expect(res, isA<BearerTokenInvalid>());
-      final invalid = res as BearerTokenInvalid;
-      expect(invalid.statusCode, equals(401));
+      final resBare = await realmValidator.validate(isHttps: true);
+      expect(resBare, isA<BearerTokenInvalid>());
+      final invalidBare = resBare as BearerTokenInvalid;
+      expect(invalidBare.statusCode, equals(401));
+      expect(invalidBare.errorUri, isNull);
       expect(
-        invalid.headers['WWW-Authenticate'],
+        invalidBare.headers['WWW-Authenticate'],
         equals('Bearer realm="api.example.com"'),
+      );
+
+      final resErr = await realmValidator.validate(
+        authorizationHeader: 'Bearer unknown-token',
+        isHttps: true,
+      );
+      expect(resErr, isA<BearerTokenInvalid>());
+      final invalidErr = resErr as BearerTokenInvalid;
+      expect(
+        invalidErr.errorUri,
+        equals('https://api.example.com/docs/errors'),
+      );
+      expect(
+        invalidErr.headers['WWW-Authenticate'],
+        contains('error_uri="https://api.example.com/docs/errors"'),
       );
 
       expect(
@@ -145,6 +170,22 @@ void main() {
         ),
         throwsArgumentError,
       );
+
+      for (final badErrorUri in [
+        'relative/path',
+        'http://:bad',
+        'https://api.example.com/bad"quote',
+      ]) {
+        expect(
+          () => BearerTokenValidator(
+            tokenRepository: tokenRepo,
+            cryptoService: crypto,
+            errorUri: badErrorUri,
+          ),
+          throwsArgumentError,
+          reason: badErrorUri,
+        );
+      }
     });
 
     test(
@@ -169,11 +210,9 @@ void main() {
     );
 
     test(
-      'should return 401 invalid_token on empty or malformed token68 syntax',
+      'should return 401 invalid_token on malformed token68 syntax',
       () async {
         for (final badHeader in [
-          'Bearer',
-          'Bearer   ',
           'Bearer bad token with spaces',
           'Bearer bad"quote',
         ]) {

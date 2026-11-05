@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:shelf/shelf.dart' as shelf;
 import '../domain/entities/access_token.dart';
+import '../domain/redirect_uri_policy.dart';
 import '../domain/services/authorize_request_validator.dart';
 import '../domain/services/bearer_token_validator.dart';
 import '../domain/services/token_request_handler.dart';
@@ -21,6 +22,16 @@ const Map<String, String> _tokenErrorHeaders = {
   'Pragma': 'no-cache',
 };
 
+const Map<String, String> _authorizeDirectHeaders = {
+  'Content-Type': 'application/json;charset=UTF-8',
+  'Cache-Control': 'no-store',
+  'Pragma': 'no-cache',
+  'X-Frame-Options': 'DENY',
+  'Content-Security-Policy': "frame-ancestors 'none'",
+};
+
+final RegExp _malformedPercentEncodingRegex = RegExp('%(?![0-9a-fA-F]{2})');
+
 shelf.Response _tokenBadRequest(String description) {
   return shelf.Response.badRequest(
     body: jsonEncode({
@@ -31,16 +42,47 @@ shelf.Response _tokenBadRequest(String description) {
   );
 }
 
+shelf.Response _authorizeDirectBadRequest(
+  String errorCode,
+  String errorDescription,
+) {
+  return shelf.Response.badRequest(
+    body: jsonEncode({
+      'error': errorCode,
+      'error_description': errorDescription,
+    }),
+    headers: _authorizeDirectHeaders,
+  );
+}
+
+void _validateIssuerParam(String issuer) {
+  if (!isValidIssuerUri(issuer, allowLoopbackHttp: true)) {
+    throw ArgumentError.value(
+      issuer,
+      'issuer',
+      'issuer must be a valid https (or loopback http) URL with no query or '
+          'fragment components.',
+    );
+  }
+}
+
 /// Handles validation of incoming parameters at the authorization endpoint.
 ///
-/// - If the HTTP method is not `GET`, returns `405 Method Not Allowed`.
-/// - If the request is invalid and **non-redirectable**, returns a
-///   `400 Bad Request` response.
+/// - Validates that [issuer] is a valid URL without query or fragment
+///   components (OAuth 2.1 Section 4.1.2 / Section 7.15.1).
+/// - If the HTTP method is not `GET`, returns `405 Method Not Allowed` with
+///   clickjacking defense headers (`X-Frame-Options: DENY` and
+///   `Content-Security-Policy: frame-ancestors 'none'`).
+/// - If the request query string has malformed percent-encoding or is invalid
+///   and **non-redirectable**, returns a `400 Bad Request` response with
+///   clickjacking defense headers.
 /// - If the request is invalid and **redirectable**, redirects the user-agent
 ///   using `303 See Other` to the client's redirect URI with the error
 ///   parameters and mandatory `iss` parameter.
 /// - If the request is valid, invokes [onConsentRequired] to delegate
-///   user authentication and consent.
+///   user authentication and consent. Note: HTML responses returned by
+///   [onConsentRequired] should also include `X-Frame-Options: DENY` and
+///   `Content-Security-Policy: frame-ancestors 'none'` per Section 7.11.
 Future<shelf.Response> handleAuthorizeRequest(
   shelf.Request request, {
   required AuthorizeRequestValidator validator,
@@ -51,6 +93,8 @@ Future<shelf.Response> handleAuthorizeRequest(
   )
   onConsentRequired,
 }) async {
+  _validateIssuerParam(issuer);
+
   if (request.method != 'GET') {
     return shelf.Response(
       405,
@@ -58,12 +102,7 @@ Future<shelf.Response> handleAuthorizeRequest(
         'error': 'invalid_request',
         'error_description': 'HTTP method must be GET.',
       }),
-      headers: {
-        'Allow': 'GET',
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-        'Pragma': 'no-cache',
-      },
+      headers: {'Allow': 'GET', ..._authorizeDirectHeaders},
     );
   }
 
@@ -89,17 +128,7 @@ Future<shelf.Response> handleAuthorizeRequest(
         state: state,
       ),
     AuthorizeDirectError(:final errorCode, :final errorDescription) =>
-      shelf.Response.badRequest(
-        body: jsonEncode({
-          'error': errorCode,
-          'error_description': errorDescription,
-        }),
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-store',
-          'Pragma': 'no-cache',
-        },
-      ),
+      _authorizeDirectBadRequest(errorCode, errorDescription),
   };
 }
 
@@ -151,6 +180,8 @@ shelf.Response _redirectSeeOther({
   required String issuer,
   String? state,
 }) {
+  _validateIssuerParam(issuer);
+
   final target = redirectUri.replace(
     queryParameters: {
       ...redirectUri.queryParameters,
@@ -163,6 +194,33 @@ shelf.Response _redirectSeeOther({
     target,
     headers: {'Cache-Control': 'no-store', 'Pragma': 'no-cache'},
   );
+}
+
+bool _isValidFormUrlEncodedContentType(String contentType) {
+  final parts = contentType.split(';');
+  final essence = parts.first.trim().toLowerCase();
+  if (essence != 'application/x-www-form-urlencoded') {
+    return false;
+  }
+  for (var i = 1; i < parts.length; i++) {
+    final param = parts[i].trim();
+    if (param.isEmpty) {
+      continue;
+    }
+    final eqIdx = param.indexOf('=');
+    if (eqIdx == -1) {
+      return false;
+    }
+    final name = param.substring(0, eqIdx).trim().toLowerCase();
+    var value = param.substring(eqIdx + 1).trim();
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value.substring(1, value.length - 1);
+    }
+    if (name == 'charset' && value.toLowerCase() != 'utf-8') {
+      return false;
+    }
+  }
+  return true;
 }
 
 /// Handles incoming POST token requests.
@@ -180,9 +238,10 @@ Future<shelf.Response> handleTokenRequest(
   }
 
   final contentType = request.headers['content-type'] ?? '';
-  if (!contentType.contains('application/x-www-form-urlencoded')) {
+  if (!_isValidFormUrlEncodedContentType(contentType)) {
     return _tokenBadRequest(
-      'Content-Type must be application/x-www-form-urlencoded.',
+      'Content-Type must be application/x-www-form-urlencoded '
+      '(with UTF-8 charset if specified).',
     );
   }
 
@@ -211,7 +270,7 @@ Future<shelf.Response> handleTokenRequest(
   final Map<String, String> body;
   try {
     bodyStr = utf8.decode(bodyBytes.takeBytes());
-    if (RegExp('%(?![0-9a-fA-F]{2})').hasMatch(bodyStr)) {
+    if (_malformedPercentEncodingRegex.hasMatch(bodyStr)) {
       return _tokenBadRequest('Malformed request body.');
     }
 
@@ -285,6 +344,7 @@ shelf.Middleware bearerAuthenticationMiddleware({
           :final headers,
           :final errorCode,
           :final errorDescription,
+          :final errorUri,
         ) =>
           shelf.Response(
             statusCode,
@@ -292,6 +352,7 @@ shelf.Middleware bearerAuthenticationMiddleware({
                 ? jsonEncode({
                     'error': errorCode,
                     'error_description': ?errorDescription,
+                    'error_uri': ?errorUri,
                   })
                 : null,
             headers: headers,

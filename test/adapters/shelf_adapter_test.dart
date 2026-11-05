@@ -234,9 +234,31 @@ void main() {
 
         expect(res.statusCode, equals(400));
         expect(res.headers['content-type'], contains('application/json'));
+        expect(res.headers['x-frame-options'], equals('DENY'));
+        expect(
+          res.headers['content-security-policy'],
+          equals("frame-ancestors 'none'"),
+        );
         final body =
             jsonDecode(await res.readAsString()) as Map<String, dynamic>;
         expect(body['error'], equals('invalid_client'));
+      });
+
+      test('should validate issuer in handleAuthorizeRequest', () async {
+        final req = shelf.Request(
+          'GET',
+          Uri.parse('https://auth.example.com/authorize?client_id=client-123'),
+        );
+        await expectLater(
+          handleAuthorizeRequest(
+            req,
+            validator: authValidator,
+            issuer: 'http://insecure.example.com',
+            onConsentRequired: (request, result) =>
+                Future.value(shelf.Response.ok('ok')),
+          ),
+          throwsArgumentError,
+        );
       });
 
       test(
@@ -349,6 +371,23 @@ void main() {
           parsed.queryParameters['iss'],
           equals('https://auth.example.com'),
         );
+
+        expect(
+          () => redirectWithAuthorizationCode(
+            redirectUri: Uri.parse('https://example.com/cb'),
+            code: 'auth-code-123',
+            issuer: 'http://insecure.example.com',
+          ),
+          throwsArgumentError,
+        );
+        expect(
+          () => redirectWithAuthorizationError(
+            redirectUri: Uri.parse('https://example.com/cb'),
+            error: 'access_denied',
+            issuer: 'https://auth.example.com?query=1',
+          ),
+          throwsArgumentError,
+        );
       });
     });
 
@@ -392,26 +431,58 @@ void main() {
         expect(body['error'], equals('invalid_request'));
       });
 
-      test('should reject non-urlencoded Content-Type', () async {
-        final req = shelf.Request(
-          'POST',
-          Uri.parse('https://auth.example.com/token'),
-          headers: {'content-type': 'application/json'},
-          body: jsonEncode({'grant_type': 'client_credentials'}),
-        );
+      test('should reject non-urlencoded Content-Type or non-UTF-8 charset and '
+          'accept UTF-8 charset parameter (Section 3.2.2)', () async {
+        for (final badContentType in [
+          'application/json',
+          'application/x-www-form-urlencoded-extra',
+          'application/x-www-form-urlencoded; charset=latin1',
+          'application/x-www-form-urlencoded; charset="iso-8859-1"',
+          'application/x-www-form-urlencoded; flag',
+        ]) {
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/token'),
+            headers: {'content-type': badContentType},
+            body: Stream.value(utf8.encode('grant_type=client_credentials')),
+          );
 
-        final res = await handleTokenRequest(
-          req,
-          handler: tokenHandler,
-          isHttps: true,
-        );
+          final res = await handleTokenRequest(
+            req,
+            handler: tokenHandler,
+            isHttps: true,
+          );
 
-        expect(res.statusCode, equals(400));
-        expect(res.headers['cache-control'], equals('no-store'));
-        expect(res.headers['pragma'], equals('no-cache'));
-        final body =
-            jsonDecode(await res.readAsString()) as Map<String, dynamic>;
-        expect(body['error'], equals('invalid_request'));
+          expect(res.statusCode, equals(400), reason: badContentType);
+          expect(res.headers['cache-control'], equals('no-store'));
+          expect(res.headers['pragma'], equals('no-cache'));
+        }
+
+        for (final validContentType in [
+          'application/x-www-form-urlencoded; charset=utf-8',
+          'application/x-www-form-urlencoded; foo=bar; charset="UTF-8"',
+          'application/x-www-form-urlencoded; ',
+        ]) {
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/token'),
+            headers: {'content-type': validContentType},
+            body: Stream.value(
+              utf8.encode(
+                'grant_type=client_credentials&'
+                'client_id=client-123&'
+                'client_secret=secret-123&'
+                'scope=read',
+              ),
+            ),
+          );
+          final res = await handleTokenRequest(
+            req,
+            handler: tokenHandler,
+            isHttps: true,
+          );
+          expect(res.statusCode, equals(200), reason: validContentType);
+        }
       });
 
       test('should successfully execute client credentials exchange', () async {
@@ -445,7 +516,7 @@ void main() {
       });
 
       test('should propagate token handler errors correctly', () async {
-        final req = shelf.Request(
+        final reqBodyAuth = shelf.Request(
           'POST',
           Uri.parse('https://auth.example.com/token'),
           headers: {'content-type': 'application/x-www-form-urlencoded'},
@@ -455,16 +526,36 @@ void main() {
               'client_secret=wrong-secret',
         );
 
-        final res = await handleTokenRequest(
-          req,
+        final resBodyAuth = await handleTokenRequest(
+          reqBodyAuth,
           handler: tokenHandler,
           isHttps: true,
         );
 
-        expect(res.statusCode, equals(401));
+        expect(resBodyAuth.statusCode, equals(400));
+        expect(resBodyAuth.headers.containsKey('www-authenticate'), isFalse);
         final body =
-            jsonDecode(await res.readAsString()) as Map<String, dynamic>;
+            jsonDecode(await resBodyAuth.readAsString())
+                as Map<String, dynamic>;
         expect(body['error'], equals('invalid_client'));
+
+        final basic = base64Encode(utf8.encode('client-123:wrong-secret'));
+        final reqBasicAuth = shelf.Request(
+          'POST',
+          Uri.parse('https://auth.example.com/token'),
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+            'authorization': 'Basic $basic',
+          },
+          body: 'grant_type=client_credentials',
+        );
+        final resBasicAuth = await handleTokenRequest(
+          reqBasicAuth,
+          handler: tokenHandler,
+          isHttps: true,
+        );
+        expect(resBasicAuth.statusCode, equals(401));
+        expect(resBasicAuth.headers['www-authenticate'], equals('Basic'));
       });
 
       test('should reject token request body containing parameter '
@@ -630,6 +721,7 @@ void main() {
           tokenRepository: tokenRepo,
           cryptoService: cryptoService,
           realm: 'resource.example.com',
+          errorUri: 'https://resource.example.com/docs/errors',
         );
         await tokenRepo.saveAccessToken(
           AccessToken(
@@ -737,6 +829,10 @@ void main() {
         final body =
             jsonDecode(await res.readAsString()) as Map<String, dynamic>;
         expect(body['error'], equals('insufficient_scope'));
+        expect(
+          body['error_uri'],
+          equals('https://resource.example.com/docs/errors'),
+        );
       });
     });
   });

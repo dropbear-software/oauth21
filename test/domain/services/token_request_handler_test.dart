@@ -475,16 +475,33 @@ void main() {
         expect(res.body['error'], equals('invalid_request'));
       });
 
-      test('should reject non-existent client', () async {
+      test('should reject non-existent client with 400 and no WWW-Authenticate '
+          'when client_secret is sent in POST body (Section 3.2.4)', () async {
         final res = await handler.handle({
           'grant_type': 'client_credentials',
           'client_id': 'client-unknown',
           'client_secret': 'secret',
         }, isHttps: true);
-        expect(res.statusCode, equals(401));
-        expect(res.headers['WWW-Authenticate'], equals('Basic'));
+        expect(res.statusCode, equals(400));
+        expect(res.headers.containsKey('WWW-Authenticate'), isFalse);
         expect(res.body['error'], equals('invalid_client'));
       });
+
+      test(
+        'should reject non-existent client with 401 and WWW-Authenticate: '
+        'Basic when Basic Authorization header is used (Section 3.2.4)',
+        () async {
+          final basic = base64Encode(utf8.encode('client-unknown:secret'));
+          final res = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: 'Basic $basic',
+            isHttps: true,
+          );
+          expect(res.statusCode, equals(401));
+          expect(res.headers['WWW-Authenticate'], equals('Basic'));
+          expect(res.body['error'], equals('invalid_client'));
+        },
+      );
 
       test('should reject missing secret for confidential client', () async {
         final res = await handler.handle({
@@ -496,16 +513,33 @@ void main() {
         expect(res.body['error'], equals('invalid_client'));
       });
 
-      test('should reject invalid secret for confidential client', () async {
-        final res = await handler.handle({
-          'grant_type': 'client_credentials',
-          'client_id': 'client-confidential',
-          'client_secret': 'wrong-secret',
-        }, isHttps: true);
-        expect(res.statusCode, equals(401));
-        expect(res.headers['WWW-Authenticate'], equals('Basic'));
-        expect(res.body['error'], equals('invalid_client'));
-      });
+      test(
+        'should reject invalid secret for confidential client with 400 and no '
+        'WWW-Authenticate when client_secret is in POST body, or 401 with '
+        'WWW-Authenticate: Basic when in Authorization header',
+        () async {
+          final resBody = await handler.handle({
+            'grant_type': 'client_credentials',
+            'client_id': 'client-confidential',
+            'client_secret': 'wrong-secret',
+          }, isHttps: true);
+          expect(resBody.statusCode, equals(400));
+          expect(resBody.headers.containsKey('WWW-Authenticate'), isFalse);
+          expect(resBody.body['error'], equals('invalid_client'));
+
+          final basic = base64Encode(
+            utf8.encode('client-confidential:wrong-secret'),
+          );
+          final resHeader = await handler.handle(
+            {'grant_type': 'client_credentials'},
+            authorizationHeader: 'Basic $basic',
+            isHttps: true,
+          );
+          expect(resHeader.statusCode, equals(401));
+          expect(resHeader.headers['WWW-Authenticate'], equals('Basic'));
+          expect(resHeader.body['error'], equals('invalid_client'));
+        },
+      );
 
       test('should reject public client providing a secret', () async {
         final res = await handler.handle({
@@ -517,12 +551,19 @@ void main() {
         expect(res.body['error'], equals('invalid_request'));
       });
 
-      test('should reject missing grant_type parameter', () async {
+      test('should reject missing or malformed grant_type parameter', () async {
         final res = await handler.handle({
           'client_id': 'client-public',
         }, isHttps: true);
         expect(res.statusCode, equals(400));
         expect(res.body['error'], equals('invalid_request'));
+
+        final resBadSyntax = await handler.handle({
+          'grant_type': r'bad!grant$type',
+          'client_id': 'client-public',
+        }, isHttps: true);
+        expect(resBadSyntax.statusCode, equals(400));
+        expect(resBadSyntax.body['error'], equals('invalid_request'));
       });
 
       test('should reject disallowed grant type', () async {
@@ -1055,17 +1096,20 @@ void main() {
       });
 
       test('should rotate refresh token and return new tokens while preserving '
-          'original expiresAt', () async {
+          'original expiresAt and original grant scope on down-scoped refresh '
+          '(Section 4.3.1 / Section 4.3.3)', () async {
         final res = await handler.handle({
           'grant_type': 'refresh_token',
           'client_id': 'client-confidential',
           'client_secret': 'secret123',
           'refresh_token': rawTokenVal,
+          'scope': 'read',
         }, isHttps: true);
 
         expect(res.statusCode, equals(200));
         expect(res.body['access_token'], isNotNull);
         expect(res.body['refresh_token'], isNotNull);
+        expect(res.body['scope'], equals('read'));
         expect(res.body['refresh_token'], isNot(equals(rawTokenVal)));
 
         final oldHash = cryptoService.hashString(rawTokenVal);
@@ -1076,6 +1120,19 @@ void main() {
         final newHash = cryptoService.hashString(newRefreshVal);
         final newToken = await tokenRepo.findRefreshTokenByHash(newHash);
         expect(newToken?.expiresAt, equals(activeToken.expiresAt));
+        expect(newToken?.scope, equals('read write'));
+
+        // Subsequent refresh using rotated token can request 'write' from the
+        // original grant scope
+        final resSecond = await handler.handle({
+          'grant_type': 'refresh_token',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'refresh_token': newRefreshVal,
+          'scope': 'write',
+        }, isHttps: true);
+        expect(resSecond.statusCode, equals(200));
+        expect(resSecond.body['scope'], equals('write'));
       });
 
       test(
