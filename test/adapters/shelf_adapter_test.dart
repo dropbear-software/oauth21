@@ -172,6 +172,7 @@ void main() {
         final res = await handleAuthorizeRequest(
           req,
           validator: authValidator,
+          issuer: 'https://auth.example.com',
           onConsentRequired: (request, result) {
             consentCalled = true;
             expect(result.isValid, isTrue);
@@ -184,6 +185,29 @@ void main() {
         expect(res.statusCode, equals(200));
         expect(await res.readAsString(), equals('consent needed'));
       });
+
+      test(
+        'should return 405 Method Not Allowed on non-GET request (#12)',
+        () async {
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/authorize'),
+          );
+
+          final res = await handleAuthorizeRequest(
+            req,
+            validator: authValidator,
+            issuer: 'https://auth.example.com',
+            onConsentRequired: (request, result) {
+              fail('Should not be called');
+            },
+          );
+
+          expect(res.statusCode, equals(405));
+          expect(res.headers['allow'], equals('GET'));
+          expect(res.headers['cache-control'], equals('no-store'));
+        },
+      );
 
       test('should return 400 JSON on non-redirectable error', () async {
         final req = shelf.Request(
@@ -198,6 +222,7 @@ void main() {
         final res = await handleAuthorizeRequest(
           req,
           validator: authValidator,
+          issuer: 'https://auth.example.com',
           onConsentRequired: (request, result) {
             fail('Should not be called');
           },
@@ -210,41 +235,52 @@ void main() {
         expect(body['error'], equals('invalid_client'));
       });
 
-      test('should return 303 redirect on redirectable error', () async {
-        final req = shelf.Request(
-          'GET',
-          Uri.parse(
-            'https://auth.example.com/authorize?'
-            'response_type=code&'
-            'client_id=client-123&'
-            'redirect_uri=https%3A%2F%2Fexample.com%2Fcb&'
-            // missing code_challenge (redirectable error)
-            'state=state123',
-          ),
-        );
+      test(
+        'should return 303 redirect with mandatory iss on redirectable error (#12)',
+        () async {
+          final req = shelf.Request(
+            'GET',
+            Uri.parse(
+              'https://auth.example.com/authorize?'
+              'response_type=code&'
+              'client_id=client-123&'
+              'redirect_uri=https%3A%2F%2Fexample.com%2Fcb&'
+              // missing code_challenge (redirectable error)
+              'state=state123',
+            ),
+          );
 
-        final res = await handleAuthorizeRequest(
-          req,
-          validator: authValidator,
-          onConsentRequired: (request, result) {
-            fail('Should not be called');
-          },
-        );
+          final res = await handleAuthorizeRequest(
+            req,
+            validator: authValidator,
+            issuer: 'https://auth.example.com',
+            onConsentRequired: (request, result) {
+              fail('Should not be called');
+            },
+          );
 
-        expect(res.statusCode, equals(303));
-        final location = res.headers['location'];
-        expect(location, isNotNull);
-        final redirectUri = Uri.parse(location!);
-        expect(redirectUri.queryParameters['error'], equals('invalid_request'));
-        expect(
-          redirectUri.queryParameters['error_description'],
-          contains('code_challenge'),
-        );
-        expect(redirectUri.queryParameters['state'], equals('state123'));
-      });
+          expect(res.statusCode, equals(303));
+          final location = res.headers['location'];
+          expect(location, isNotNull);
+          final redirectUri = Uri.parse(location!);
+          expect(
+            redirectUri.queryParameters['error'],
+            equals('invalid_request'),
+          );
+          expect(
+            redirectUri.queryParameters['error_description'],
+            contains('code_challenge'),
+          );
+          expect(redirectUri.queryParameters['state'], equals('state123'));
+          expect(
+            redirectUri.queryParameters['iss'],
+            equals('https://auth.example.com'),
+          );
+        },
+      );
     });
 
-    group('redirectWithAuthorizationCode', () {
+    group('redirectWithAuthorizationCode & redirectWithAuthorizationError', () {
       test('should build 303 redirect with code, state, and iss', () {
         final res = redirectWithAuthorizationCode(
           redirectUri: Uri.parse('https://example.com/cb?existing=1'),
@@ -269,6 +305,50 @@ void main() {
           equals('https://auth.example.com'),
         );
       });
+
+      test(
+        'should omit state when state is null in redirectWithAuthorizationCode (#5)',
+        () {
+          final res = redirectWithAuthorizationCode(
+            redirectUri: Uri.parse('https://example.com/cb'),
+            code: 'auth-code-123',
+            issuer: 'https://auth.example.com',
+          );
+
+          final parsed = Uri.parse(res.headers['location']!);
+          expect(parsed.queryParameters['code'], equals('auth-code-123'));
+          expect(parsed.queryParameters.containsKey('state'), isFalse);
+          expect(
+            parsed.queryParameters['iss'],
+            equals('https://auth.example.com'),
+          );
+        },
+      );
+
+      test(
+        'should build 303 error redirect with mandatory iss in redirectWithAuthorizationError (#12)',
+        () {
+          final res = redirectWithAuthorizationError(
+            redirectUri: Uri.parse('https://example.com/cb'),
+            error: 'access_denied',
+            errorDescription: 'User denied access.',
+            issuer: 'https://auth.example.com',
+          );
+
+          expect(res.statusCode, equals(303));
+          final parsed = Uri.parse(res.headers['location']!);
+          expect(parsed.queryParameters['error'], equals('access_denied'));
+          expect(
+            parsed.queryParameters['error_description'],
+            equals('User denied access.'),
+          );
+          expect(parsed.queryParameters.containsKey('state'), isFalse);
+          expect(
+            parsed.queryParameters['iss'],
+            equals('https://auth.example.com'),
+          );
+        },
+      );
     });
 
     group('handleTokenRequest', () {

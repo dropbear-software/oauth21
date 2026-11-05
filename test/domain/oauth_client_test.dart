@@ -66,6 +66,27 @@ void main() {
         expect(request.codeChallenge, equals(challenge));
         expect(request.scope, equals('read write'));
       });
+
+      test('should build a valid AuthRequest when state is omitted (#5)', () {
+        final client = OAuthClient(
+          authorizationEndpoint: authEndpoint,
+          tokenEndpoint: tokenEndpoint,
+          clientId: clientId,
+          httpClient: MockOAuthHttpClient(
+            (u, h, b) async =>
+                const OAuthHttpResponse(statusCode: 200, body: '', headers: {}),
+          ),
+        );
+        final verifier = CodeVerifier.generate();
+        final challenge = CodeChallenge.s256(verifier);
+        final request = client.createAuthorizationRequest(
+          redirectUri: Uri.parse('https://client.example.com/callback'),
+          codeChallenge: challenge,
+        );
+
+        expect(request.state, isNull);
+        expect(request.toUri().queryParameters.containsKey('state'), isFalse);
+      });
     });
 
     group('validateCallback', () {
@@ -131,6 +152,26 @@ void main() {
           throwsStateError,
         );
       });
+
+      test(
+        'should succeed when expectedState is omitted and callback has no state, and reject unsolicited state (#5)',
+        () {
+          const paramsWithoutState = OAuthRedirectParameters(code: 'code123');
+          expect(
+            () => clientNoIssuer.validateCallback(paramsWithoutState),
+            returnsNormally,
+          );
+
+          const paramsWithUnsolicitedState = OAuthRedirectParameters(
+            code: 'code123',
+            state: 'unsolicited-state',
+          );
+          expect(
+            () => clientNoIssuer.validateCallback(paramsWithUnsolicitedState),
+            throwsStateError,
+          );
+        },
+      );
 
       test(
         'should pass issuer verification when iss matches expectedIssuer',

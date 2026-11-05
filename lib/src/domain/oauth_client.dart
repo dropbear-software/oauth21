@@ -47,8 +47,8 @@ class OAuthClient {
   /// Composes a secure front-channel [AuthRequest] for authorization code grant.
   AuthRequest createAuthorizationRequest({
     required Uri redirectUri,
-    required String state,
     required CodeChallenge codeChallenge,
+    String? state,
     String? scope,
     Map<String, String> customParameters = const {},
   }) {
@@ -65,24 +65,33 @@ class OAuthClient {
 
   /// Validates the incoming redirect callback parameters.
   ///
-  /// - Enforces character-for-character state matching to prevent CSRF.
+  /// - Enforces character-for-character state matching to prevent CSRF when
+  ///   [expectedState] is provided, or rejects unsolicited `state` parameters
+  ///   when [expectedState] is omitted.
   /// - Validates the `iss` parameter if [expectedIssuer] is defined, preventing server mix-up attacks.
   ///
   /// Throws [StateError] if validation fails.
   void validateCallback(
     OAuthRedirectParameters params, {
-    required String expectedState,
+    String? expectedState,
   }) {
     // 1. Verify CSRF state token
-    if (params.state == null) {
+    if (expectedState != null) {
+      if (params.state == null) {
+        throw StateError(
+          'CSRF validation failed: callback did not contain a state parameter.',
+        );
+      }
+      if (params.state != expectedState) {
+        throw StateError(
+          'CSRF validation failed: incoming state "${params.state}" '
+          'does not match expected state "$expectedState".',
+        );
+      }
+    } else if (params.state != null) {
       throw StateError(
-        'CSRF validation failed: callback did not contain a state parameter.',
-      );
-    }
-    if (params.state != expectedState) {
-      throw StateError(
-        'CSRF validation failed: incoming state "${params.state}" '
-        'does not match expected state "$expectedState".',
+        'CSRF validation failed: unexpected state "${params.state}" received '
+        'when no state was sent in the authorization request.',
       );
     }
 

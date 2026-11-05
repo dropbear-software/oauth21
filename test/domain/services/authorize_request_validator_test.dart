@@ -283,14 +283,22 @@ void main() {
       expect(result.state, isNull);
     });
 
-    test('should reject missing state (redirectable)', () async {
-      final params = createParams(state: null);
+    test(
+      'should allow omitted or empty state parameter per Section 4.1.1',
+      () async {
+        final omittedStateParams = createParams(state: null);
+        final omittedResult = await validator.validate(omittedStateParams);
+        expect(omittedResult.isValid, isTrue);
+        expect(omittedResult.state, isNull);
 
-      final result = await validator.validate(params);
-      expect(result.isValid, isFalse);
-      expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
-    });
+        final emptyStateParams = Map<String, List<String>>.unmodifiable(
+          createParams(state: ''),
+        );
+        final emptyResult = await validator.validate(emptyStateParams);
+        expect(emptyResult.isValid, isTrue);
+        expect(emptyResult.state, isNull);
+      },
+    );
 
     test('should reject untrimmed state (redirectable)', () async {
       final params = createParams(state: 'state-xyz ');
@@ -381,7 +389,7 @@ void main() {
       final result = await validator.validate(params);
       expect(result.isValid, isFalse);
       expect(result.isRedirectable, isTrue);
-      expect(result.errorCode, equals('invalid_request'));
+      expect(result.errorCode, equals('invalid_scope'));
     });
 
     test(
@@ -392,7 +400,7 @@ void main() {
         final result = await validator.validate(params);
         expect(result.isValid, isFalse);
         expect(result.isRedirectable, isTrue);
-        expect(result.errorCode, equals('invalid_request'));
+        expect(result.errorCode, equals('invalid_scope'));
       },
     );
 
@@ -427,6 +435,88 @@ void main() {
       expect(result.isRedirectable, isFalse);
       expect(result.errorCode, equals('invalid_request'));
     });
+
+    test(
+      'should reject non-loopback redirect_uri containing dot-segment path traversal or reserved/duplicate/malformed query parameters (#10)',
+      () async {
+        for (final badRedirect in [
+          'https://example.com/evil/../cb',
+          'https://example.com/./cb',
+          'https://example.com/cb?code=injected',
+          'https://example.com/cb?state=injected',
+          'https://example.com/cb?iss=https://evil.example',
+          'https://example.com/cb?error=access_denied',
+          'https://example.com/cb?error_description=bad',
+          'https://example.com/cb?error_uri=https://evil.example',
+          'https://example.com/cb?foo=1&foo=2',
+          'https://example.com/cb?foo=%ZZ',
+        ]) {
+          final params = createParams(redirectUri: badRedirect);
+          final result = await validator.validate(params);
+          expect(
+            result.isValid,
+            isFalse,
+            reason: 'Expected $badRedirect to be rejected',
+          );
+          expect(result.isRedirectable, isFalse);
+          expect(result.errorCode, equals('invalid_request'));
+        }
+      },
+    );
+
+    test(
+      'should reject client not authorized for authorization_code grant with unauthorized_client (#12)',
+      () async {
+        final ccOnlyClient = ClientRegistration(
+          clientId: 'client-cc-only',
+          clientType: ClientType.confidential,
+          clientSecretHash: 'hashed-secret',
+          redirectUris: {Uri.parse('https://example.com/cb')},
+          allowedScopes: {'read'},
+          allowedGrantTypes: {'client_credentials'},
+        );
+        clientRepo.addClient(ccOnlyClient);
+
+        final params = createParams(clientId: 'client-cc-only');
+        final result = await validator.validate(params);
+
+        expect(result.isValid, isFalse);
+        expect(result.isRedirectable, isTrue);
+        expect(result.errorCode, equals('unauthorized_client'));
+        expect(result.state, equals('state-xyz'));
+      },
+    );
+
+    test(
+      'should treat empty parameter values (key=) as omitted without mutating unmodifiable maps (#13)',
+      () async {
+        final singleRedirectClient = ClientRegistration(
+          clientId: 'client-single-empty',
+          clientType: ClientType.public,
+          redirectUris: {Uri.parse('https://example.com/single')},
+          allowedScopes: {'read', 'write'},
+        );
+        clientRepo.addClient(singleRedirectClient);
+
+        final params = Map<String, List<String>>.unmodifiable(
+          createParams(
+            clientId: 'client-single-empty',
+            redirectUri: '',
+            state: '',
+            scope: '',
+          ),
+        );
+
+        final result = await validator.validate(params);
+        expect(result.isValid, isTrue);
+        expect(
+          result.validatedRedirectUri,
+          equals(Uri.parse('https://example.com/single')),
+        );
+        expect(result.state, isNull);
+        expect(result.requestedScopes, equals({'read', 'write'}));
+      },
+    );
 
     test('should successfully validate localhost loopback regardless of '
         'case variation', () async {

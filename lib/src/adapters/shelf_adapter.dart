@@ -22,21 +22,40 @@ shelf.Response _tokenBadRequest(String description) {
 
 /// Handles validation of incoming parameters at the authorization endpoint.
 ///
+/// - If the HTTP method is not `GET`, returns `405 Method Not Allowed`.
 /// - If the request is invalid and **non-redirectable**, returns a
 ///   `400 Bad Request` response.
 /// - If the request is invalid and **redirectable**, redirects the user-agent
-///   using `303 See Other` to the client's redirect URI with the error parameters.
+///   using `303 See Other` to the client's redirect URI with the error
+///   parameters and mandatory `iss` parameter.
 /// - If the request is valid, invokes [onConsentRequired] to delegate
 ///   user authentication and consent.
 Future<shelf.Response> handleAuthorizeRequest(
   shelf.Request request, {
   required AuthorizeRequestValidator validator,
+  required String issuer,
   required Future<shelf.Response> Function(
     shelf.Request request,
     AuthorizeValidationResult result,
   )
   onConsentRequired,
 }) async {
+  if (request.method != 'GET') {
+    return shelf.Response(
+      405,
+      body: jsonEncode({
+        'error': 'invalid_request',
+        'error_description': 'HTTP method must be GET.',
+      }),
+      headers: {
+        'Allow': 'GET',
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+        'Pragma': 'no-cache',
+      },
+    );
+  }
+
   // Collect query parameters supporting multi-value parameters for pollution checks.
   final params = request.requestedUri.queryParametersAll;
 
@@ -44,22 +63,24 @@ Future<shelf.Response> handleAuthorizeRequest(
 
   if (!result.isValid) {
     if (result.isRedirectable && result.validatedRedirectUri != null) {
-      final target = result.validatedRedirectUri!.replace(
-        queryParameters: {
-          ...result.validatedRedirectUri!.queryParameters,
-          'error': result.errorCode!,
-          'error_description': result.errorDescription!,
-          if (result.state != null) 'state': result.state!,
-        },
+      return redirectWithAuthorizationError(
+        redirectUri: result.validatedRedirectUri!,
+        error: result.errorCode!,
+        issuer: issuer,
+        errorDescription: result.errorDescription,
+        state: result.state,
       );
-      return shelf.Response.seeOther(target);
     } else {
       return shelf.Response.badRequest(
         body: jsonEncode({
           'error': result.errorCode,
           'error_description': result.errorDescription,
         }),
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Pragma': 'no-cache',
+        },
       );
     }
   }
@@ -69,22 +90,54 @@ Future<shelf.Response> handleAuthorizeRequest(
 
 /// Redirects the user-agent back to the client redirect URI with the auth code.
 ///
-/// Employs HTTP status code `303 See Other` and includes the mandatory `iss` parameter.
+/// Employs HTTP status code `303 See Other` and includes the mandatory `iss`
+/// parameter and optional [state] parameter.
 shelf.Response redirectWithAuthorizationCode({
   required Uri redirectUri,
   required String code,
-  required String state,
   required String issuer,
+  String? state,
 }) {
   final target = redirectUri.replace(
     queryParameters: {
       ...redirectUri.queryParameters,
       'code': code,
-      'state': state,
+      if (state != null && state.isNotEmpty) 'state': state,
       'iss': issuer,
     },
   );
-  return shelf.Response.seeOther(target);
+  return shelf.Response.seeOther(
+    target,
+    headers: {'Cache-Control': 'no-store', 'Pragma': 'no-cache'},
+  );
+}
+
+/// Redirects the user-agent back to the client redirect URI with an OAuth 2.1
+/// authorization error response.
+///
+/// Employs HTTP status code `303 See Other` and includes `error`, optional
+/// [errorDescription], optional [state], and mandatory [issuer] (`iss`).
+shelf.Response redirectWithAuthorizationError({
+  required Uri redirectUri,
+  required String error,
+  required String issuer,
+  String? errorDescription,
+  String? state,
+}) {
+  final target = redirectUri.replace(
+    queryParameters: {
+      ...redirectUri.queryParameters,
+      'error': error,
+      if (errorDescription != null && errorDescription.isNotEmpty)
+        'error_description': errorDescription,
+      if (state != null && state.isNotEmpty) 'state': state,
+      'iss': issuer,
+    },
+  );
+  return shelf.Response.seeOther(
+    target,
+    headers: {'Cache-Control': 'no-store', 'Pragma': 'no-cache'},
+  );
 }
 
 /// Handles incoming POST token requests.

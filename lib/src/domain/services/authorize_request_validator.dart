@@ -1,3 +1,4 @@
+import '../abnf_validators.dart';
 import '../entities/client_registration.dart';
 import '../ports/client_repository.dart';
 import '../redirect_uri_policy.dart';
@@ -93,8 +94,9 @@ class AuthorizeRequestValidator {
       );
     }
 
-    // 2. Client verification
-    if (clientIds.isEmpty || clientIds.first.isEmpty) {
+    // 2. Client verification (empty value is treated as omitted per Section 3.1)
+    final clientId = _singleNonEmptyValue(clientIds);
+    if (clientId == null) {
       return const AuthorizeValidationResult.invalid(
         isRedirectable: false,
         errorCode: 'invalid_request',
@@ -102,10 +104,7 @@ class AuthorizeRequestValidator {
       );
     }
 
-    final clientId = clientIds.first;
-    final vscharRequiredRegex = RegExp(r'^[\x20-\x7E]+$');
-    if (clientId.trim() != clientId ||
-        !vscharRequiredRegex.hasMatch(clientId)) {
+    if (!isValidVscharParam(clientId)) {
       return const AuthorizeValidationResult.invalid(
         isRedirectable: false,
         errorCode: 'invalid_request',
@@ -125,7 +124,8 @@ class AuthorizeRequestValidator {
 
     // 3. Redirect URI match
     Uri validatedRedirectUri;
-    if (redirectUris.isEmpty || redirectUris.first.isEmpty) {
+    final reqRedirectStr = _singleNonEmptyValue(redirectUris);
+    if (reqRedirectStr == null) {
       if (client.redirectUris.length == 1) {
         validatedRedirectUri = client.redirectUris.first;
         if (!isAllowedRedirectUri(validatedRedirectUri)) {
@@ -146,7 +146,6 @@ class AuthorizeRequestValidator {
         );
       }
     } else {
-      final reqRedirectStr = redirectUris.first;
       try {
         validatedRedirectUri = Uri.parse(reqRedirectStr);
       } on FormatException catch (_) {
@@ -157,8 +156,13 @@ class AuthorizeRequestValidator {
         );
       }
 
-      if (!isAllowedRedirectUri(validatedRedirectUri) ||
-          !_isRedirectUriAllowed(client, validatedRedirectUri)) {
+      if (_hasRawDotSegment(reqRedirectStr) ||
+          !isAllowedRedirectUri(validatedRedirectUri) ||
+          !_isRedirectUriAllowed(
+            client,
+            validatedRedirectUri,
+            reqRedirectStr,
+          )) {
         return const AuthorizeValidationResult.invalid(
           isRedirectable: false,
           errorCode: 'invalid_request',
@@ -169,8 +173,7 @@ class AuthorizeRequestValidator {
     }
 
     // From this point onward, errors can be redirected back to the client's
-    // validatedRedirectUri. However, we must also extract and validate "state"
-    // because we need it in the redirection.
+    // validatedRedirectUri. Extract and validate optional "state" (Section 4.1.1).
     final states = params['state'] ?? [];
     if (states.length > 1) {
       return AuthorizeValidationResult.invalid(
@@ -182,18 +185,8 @@ class AuthorizeRequestValidator {
       );
     }
 
-    if (states.isEmpty || states.first.isEmpty) {
-      return AuthorizeValidationResult.invalid(
-        isRedirectable: true,
-        errorCode: 'invalid_request',
-        errorDescription: 'Missing state parameter.',
-        client: client,
-        validatedRedirectUri: validatedRedirectUri,
-      );
-    }
-
-    final state = states.first;
-    if (state.trim() != state || !vscharRequiredRegex.hasMatch(state)) {
+    final state = _singleNonEmptyValue(states);
+    if (state != null && !isValidVscharParam(state)) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
@@ -218,9 +211,23 @@ class AuthorizeRequestValidator {
       }
     }
 
+    // Verify client is authorized for the authorization_code grant (Section 4.1.2.1)
+    if (!client.allowedGrantTypes.contains('authorization_code')) {
+      return AuthorizeValidationResult.invalid(
+        isRedirectable: true,
+        errorCode: 'unauthorized_client',
+        errorDescription:
+            'The client is not authorized to request an authorization code '
+            'using this method.',
+        client: client,
+        validatedRedirectUri: validatedRedirectUri,
+        state: state,
+      );
+    }
+
     // Validate response_type
-    final responseTypes = params['response_type'] ?? [];
-    if (responseTypes.isEmpty || responseTypes.first.isEmpty) {
+    final responseType = _singleNonEmptyValue(params['response_type']);
+    if (responseType == null) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
@@ -230,7 +237,6 @@ class AuthorizeRequestValidator {
         state: state,
       );
     }
-    final responseType = responseTypes.first;
     if (responseType != 'code') {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
@@ -243,8 +249,8 @@ class AuthorizeRequestValidator {
     }
 
     // Validate PKCE (code_challenge and code_challenge_method are mandatory)
-    final codeChallenges = params['code_challenge'] ?? [];
-    if (codeChallenges.isEmpty || codeChallenges.first.isEmpty) {
+    final codeChallenge = _singleNonEmptyValue(params['code_challenge']);
+    if (codeChallenge == null) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
@@ -254,9 +260,7 @@ class AuthorizeRequestValidator {
         state: state,
       );
     }
-    final codeChallenge = codeChallenges.first;
-    final challengeRegex = RegExp(r'^[A-Za-z0-9\-\._~]{43,128}$');
-    if (!challengeRegex.hasMatch(codeChallenge)) {
+    if (!codeVerifierAbnfRegex.hasMatch(codeChallenge)) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
@@ -267,8 +271,10 @@ class AuthorizeRequestValidator {
       );
     }
 
-    final codeChallengeMethods = params['code_challenge_method'] ?? [];
-    if (codeChallengeMethods.isEmpty || codeChallengeMethods.first.isEmpty) {
+    final codeChallengeMethod = _singleNonEmptyValue(
+      params['code_challenge_method'],
+    );
+    if (codeChallengeMethod == null) {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
@@ -278,7 +284,6 @@ class AuthorizeRequestValidator {
         state: state,
       );
     }
-    final codeChallengeMethod = codeChallengeMethods.first;
     if (codeChallengeMethod != 'S256') {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
@@ -291,34 +296,21 @@ class AuthorizeRequestValidator {
     }
 
     // Validate scope (if present)
-    final scopes = params['scope'] ?? [];
+    final scopeStr = _singleNonEmptyValue(params['scope']);
     final requestedScopes = <String>{};
-    if (scopes.isNotEmpty && scopes.first.isNotEmpty) {
-      final scopeStr = scopes.first;
-      final tokens = scopeStr.split(' ');
-      final scopeTokenRegex = RegExp(r'^[\x21\x23-\x5B\x5D-\x7E]+$');
-      for (final token in tokens) {
-        if (token.isEmpty) {
-          return AuthorizeValidationResult.invalid(
-            isRedirectable: true,
-            errorCode: 'invalid_request',
-            errorDescription:
-                'Scope contains empty tokens or consecutive spaces.',
-            client: client,
-            validatedRedirectUri: validatedRedirectUri,
-            state: state,
-          );
-        }
-        if (!scopeTokenRegex.hasMatch(token)) {
-          return AuthorizeValidationResult.invalid(
-            isRedirectable: true,
-            errorCode: 'invalid_request',
-            errorDescription: 'Scope token "$token" violates ABNF constraints.',
-            client: client,
-            validatedRedirectUri: validatedRedirectUri,
-            state: state,
-          );
-        }
+    if (scopeStr != null) {
+      final parsedScopes = parseAndDeduplicateScope(scopeStr);
+      if (parsedScopes == null) {
+        return AuthorizeValidationResult.invalid(
+          isRedirectable: true,
+          errorCode: 'invalid_scope',
+          errorDescription: 'The requested scope is malformed.',
+          client: client,
+          validatedRedirectUri: validatedRedirectUri,
+          state: state,
+        );
+      }
+      for (final token in parsedScopes) {
         if (!client.allowedScopes.contains(token)) {
           return AuthorizeValidationResult.invalid(
             isRedirectable: true,
@@ -347,24 +339,64 @@ class AuthorizeRequestValidator {
     );
   }
 
-  bool _isRedirectUriAllowed(ClientRegistration client, Uri requestedUri) {
+  String? _singleNonEmptyValue(List<String>? values) {
+    if (values == null || values.isEmpty) {
+      return null;
+    }
+    final first = values.first;
+    return first.isEmpty ? null : first;
+  }
+
+  bool _hasRawDotSegment(String rawUri) {
+    final schemeEnd = rawUri.indexOf('://');
+    final pathStart = schemeEnd != -1
+        ? rawUri.indexOf('/', schemeEnd + 3)
+        : rawUri.indexOf('/');
+    if (pathStart == -1) {
+      return false;
+    }
+    var pathEnd = rawUri.indexOf('?', pathStart);
+    final fragStart = rawUri.indexOf('#', pathStart);
+    if (pathEnd == -1 || (fragStart != -1 && fragStart < pathEnd)) {
+      pathEnd = fragStart;
+    }
+    final rawPath = pathEnd == -1
+        ? rawUri.substring(pathStart)
+        : rawUri.substring(pathStart, pathEnd);
+    for (final segment in rawPath.split('/')) {
+      try {
+        final decoded = Uri.decodeComponent(segment);
+        if (decoded == '.' || decoded == '..') {
+          return true;
+        }
+      } on Object catch (_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isRedirectUriAllowed(
+    ClientRegistration client,
+    Uri requestedUri,
+    String rawRequestedUri,
+  ) {
     if (!isAllowedRedirectUri(requestedUri)) {
       return false;
     }
-    final reqNormalized = requestedUri.normalizePath();
     for (final registeredUri in client.redirectUris) {
       if (!isAllowedRedirectUri(registeredUri)) {
         continue;
       }
-      final regNormalized = registeredUri.normalizePath();
-      if (regNormalized == reqNormalized) {
+      if (registeredUri.toString() == rawRequestedUri &&
+          registeredUri.toString() == requestedUri.toString()) {
         return true;
       }
-      if (regNormalized.scheme == 'http' &&
-          isLoopbackHost(regNormalized.host) &&
-          reqNormalized.scheme == 'http' &&
-          isLoopbackHost(reqNormalized.host)) {
-        if (_matchLoopback(regNormalized, reqNormalized)) {
+      if (registeredUri.scheme.toLowerCase() == 'http' &&
+          isLoopbackHost(registeredUri.host) &&
+          requestedUri.scheme.toLowerCase() == 'http' &&
+          isLoopbackHost(requestedUri.host)) {
+        if (_matchLoopback(registeredUri, requestedUri)) {
           return true;
         }
       }
@@ -373,11 +405,10 @@ class AuthorizeRequestValidator {
   }
 
   bool _matchLoopback(Uri registered, Uri requested) {
-    if (registered.host.toLowerCase() != requested.host.toLowerCase()) {
-      return false;
-    }
-    final regNormalized = registered.replace(port: 0);
-    final reqNormalized = requested.replace(port: 0);
-    return regNormalized == reqNormalized;
+    return registered.scheme.toLowerCase() == 'http' &&
+        requested.scheme.toLowerCase() == 'http' &&
+        registered.host.toLowerCase() == requested.host.toLowerCase() &&
+        registered.path == requested.path &&
+        registered.query == requested.query;
   }
 }

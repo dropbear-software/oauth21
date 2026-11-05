@@ -46,6 +46,7 @@ void main() async {
       return handleAuthorizeRequest(
         request,
         validator: authorizeValidator,
+        issuer: 'http://localhost:8080',
         onConsentRequired: (req, validationResult) async {
           print('[Server] Authorize request is valid. User consent granted.');
 

@@ -1,3 +1,5 @@
+import '../abnf_validators.dart';
+
 /// Represents parsed callback redirect parameters from the authorization server.
 class OAuthRedirectParameters {
   /// The authorization code issued by the server, if successful.
@@ -15,6 +17,9 @@ class OAuthRedirectParameters {
   /// The error description returned by the server, if the authorization failed.
   final String? errorDescription;
 
+  /// The error URI returned by the server, if the authorization failed.
+  final String? errorUri;
+
   /// Creates a new [OAuthRedirectParameters] instance.
   const OAuthRedirectParameters({
     this.code,
@@ -22,6 +27,7 @@ class OAuthRedirectParameters {
     this.iss,
     this.error,
     this.errorDescription,
+    this.errorUri,
   });
 }
 
@@ -65,6 +71,7 @@ class DefaultRequestParser implements OAuthRequestParser {
     final iss = getParam('iss');
     final error = getParam('error');
     final errorDescription = getParam('error_description');
+    final errorUri = getParam('error_uri');
 
     // Reject structural dead-ends (neither code nor error present)
     if (code == null && error == null) {
@@ -73,11 +80,12 @@ class DefaultRequestParser implements OAuthRequestParser {
       );
     }
 
-    // ABNF character validation:
-    // VSCHAR = %x20-7E
-    final vscharRequiredRegex = RegExp(r'^[\x20-\x7E]+$');
-    // NQSCHAR = %x20-21 / %x23-5B / %x5D-7E
-    final nqscharRegex = RegExp(r'^[\x20-\x21\x23-\x5B\x5D-\x7E]+$');
+    // Reject ambiguous callbacks containing both code and error
+    if (code != null && error != null) {
+      throw ArgumentError(
+        'Security violation: callback redirect cannot contain both "code" and "error" parameters.',
+      );
+    }
 
     if (code != null && !vscharRequiredRegex.hasMatch(code)) {
       throw FormatException(
@@ -91,15 +99,28 @@ class DefaultRequestParser implements OAuthRequestParser {
       );
     }
 
-    if (error != null && !nqscharRegex.hasMatch(error)) {
+    if (iss != null && !vscharRequiredRegex.hasMatch(iss)) {
+      throw FormatException(
+        'Security violation: "iss" parameter contains characters violating ABNF VSCHAR syntax.',
+      );
+    }
+
+    if (error != null && !nqscharRequiredRegex.hasMatch(error)) {
       throw FormatException(
         'Security violation: "error" parameter contains characters violating ABNF NQSCHAR syntax.',
       );
     }
 
-    if (errorDescription != null && !nqscharRegex.hasMatch(errorDescription)) {
+    if (errorDescription != null &&
+        !nqscharRequiredRegex.hasMatch(errorDescription)) {
       throw FormatException(
         'Security violation: "error_description" parameter contains characters violating ABNF NQSCHAR syntax.',
+      );
+    }
+
+    if (errorUri != null && !isValidErrorUri(errorUri)) {
+      throw FormatException(
+        'Security violation: "error_uri" parameter violates ABNF NQCHAR or URI syntax.',
       );
     }
 
@@ -109,6 +130,7 @@ class DefaultRequestParser implements OAuthRequestParser {
       iss: iss,
       error: error,
       errorDescription: errorDescription,
+      errorUri: errorUri,
     );
   }
 }
