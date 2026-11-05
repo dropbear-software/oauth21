@@ -273,5 +273,17 @@ void main() {
       expect(valid.accessToken.clientId, equals('client-1'));
       expect(valid.accessToken.userId, equals('user-1'));
     });
+
+    test('should throw ArgumentError when requiredScopes contains non-NQCHAR '
+        'characters', () async {
+      await expectLater(
+        validator.validate(
+          authorizationHeader: 'Bearer $validRawToken',
+          requiredScopes: {'read write'},
+          isHttps: true,
+        ),
+        throwsArgumentError,
+      );
+    });
   });
 }

@@ -375,6 +375,16 @@ void main() {
         );
         expect(resBearer.statusCode, equals(401));
         expect(resBearer.headers['WWW-Authenticate'], equals('Basic'));
+
+        final nonVscharBasic =
+            'Basic ${base64.encode(utf8.encode('client%0A:secret'))}';
+        final resNonVschar = await handler.handle(
+          {'grant_type': 'client_credentials'},
+          authorizationHeader: nonVscharBasic,
+          isHttps: true,
+        );
+        expect(resNonVschar.statusCode, equals(401));
+        expect(resNonVschar.headers['WWW-Authenticate'], equals('Basic'));
       });
 
       test(
@@ -522,6 +532,25 @@ void main() {
         }, isHttps: true);
         expect(res.statusCode, equals(400));
         expect(res.body['error'], equals('unauthorized_client'));
+      });
+
+      test('should return unsupported_grant_type when client allows an '
+          'unrecognized grant type', () async {
+        final customGrantClient = ClientRegistration(
+          clientId: 'client-custom-grant',
+          clientType: ClientType.public,
+          redirectUris: {Uri.parse('https://example.com/cb')},
+          allowedScopes: {'read'},
+          allowedGrantTypes: {'urn:ietf:params:oauth:grant-type:device_code'},
+        );
+        clientRepo.clients[customGrantClient.clientId] = customGrantClient;
+
+        final res = await handler.handle({
+          'grant_type': 'urn:ietf:params:oauth:grant-type:device_code',
+          'client_id': 'client-custom-grant',
+        }, isHttps: true);
+        expect(res.statusCode, equals(400));
+        expect(res.body['error'], equals('unsupported_grant_type'));
       });
     });
 
@@ -928,6 +957,25 @@ void main() {
           expect(rotatedRefresh?.isRevoked, isTrue);
         },
       );
+
+      test('should revoke code family when saveIssuedTokens detects concurrent '
+          'authorization code compromise', () async {
+        tokenRepo.revokedCodes.add('valid-auth-code');
+
+        final res = await handler.handle({
+          'grant_type': 'authorization_code',
+          'client_id': 'client-confidential',
+          'client_secret': 'secret123',
+          'code': 'valid-auth-code',
+          'code_verifier': verifier,
+          'redirect_uri': 'https://example.com/cb',
+        }, isHttps: true);
+
+        expect(res.statusCode, equals(400));
+        expect(res.body['error'], equals('invalid_grant'));
+        expect(tokenRepo.revokeByCodeCalled, isTrue);
+        expect(tokenRepo.revokeAllCalled, isTrue);
+      });
     });
 
     group('Client Credentials Grant', () {
@@ -1149,6 +1197,7 @@ void main() {
             final olderRevokedToken = token.copyWith(
               isRevoked: true,
               revokedAt: DateTime.now().subtract(const Duration(seconds: 31)),
+              authorizationCode: 'origin-auth-code',
             );
             await tokenRepo.saveRefreshToken(olderRevokedToken);
           }
@@ -1162,6 +1211,8 @@ void main() {
 
           expect(res.statusCode, equals(400));
           expect(res.body['error'], equals('invalid_grant'));
+          expect(tokenRepo.revokeByCodeCalled, isTrue);
+          expect(tokenRepo.revokedByCodeValue, equals('origin-auth-code'));
           expect(tokenRepo.revokeAllCalled, isTrue);
           expect(tokenRepo.revokedClientId, equals('client-confidential'));
           expect(tokenRepo.revokedUserId, equals('user-456'));

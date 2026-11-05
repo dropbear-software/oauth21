@@ -564,7 +564,7 @@ void main() {
             'content-type': 'application/x-www-form-urlencoded',
             'content-length': '-5',
           },
-          body: 'grant_type=client_credentials',
+          body: Stream.value(utf8.encode('grant_type=client_credentials')),
         );
         final resBadLen = await handleTokenRequest(
           badContentLengthReq,
@@ -572,6 +572,10 @@ void main() {
           isHttps: true,
         );
         expect(resBadLen.statusCode, equals(400));
+        expect(
+          await resBadLen.readAsString(),
+          contains('Invalid Content-Length header'),
+        );
 
         final invalidUtf8Req = shelf.Request(
           'POST',
