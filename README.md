@@ -136,6 +136,11 @@ final oauthClient = OAuthClient(
   tokenEndpoint: 'https://auth.example.com/token',
   clientId: 'my-client-id',
   httpClient: HttpAdapter(httpClient),
+  // Optional confidential client credentials (defaults to
+  // ClientAuthMethod.clientSecretPost per OAuth 2.1 Section 2.4.1; use
+  // ClientAuthMethod.clientSecretBasic for HTTP Basic authentication):
+  // clientSecret: 'my-client-secret',
+  // authMethod: ClientAuthMethod.clientSecretPost,
   // Optional: prevents mix-up attacks
   expectedIssuer: 'https://auth.example.com',
 );
@@ -351,12 +356,14 @@ switch (result) {
     :final state,
   ):
     // Safely redirect the user agent back to client's redirect URI with the
-    // error parameters
+    // error parameters and mandatory OAuth 2.1 issuer identifier ('iss')
     final errorUri = validatedRedirectUri.replace(
       queryParameters: {
+        ...validatedRedirectUri.queryParameters,
         'error': errorCode,
         'error_description': errorDescription,
         if (state != null) 'state': state,
+        'iss': 'https://auth.example.com',
       },
     );
 
@@ -411,6 +418,7 @@ router.get('/authorize', (shelf.Request request) {
   return handleAuthorizeRequest(
     request,
     validator: authorizeValidator,
+    issuer: 'https://auth.example.com',
     onConsentRequired: (req, validationResult) async {
       // User consent/auth login flow...
       // Redirect back with Auth Code:
@@ -432,7 +440,56 @@ router.post('/token', (shelf.Request request) {
     isHttps: true, // enforces TLS compliance
   );
 });
+
+// 3. Protected Resource Server Endpoint (Bearer Token Middleware)
+final bearerValidator = BearerTokenValidator(
+  tokenRepository: myTokenRepository,
+  cryptoService: MyCryptoService(),
+  realm: 'example-api',
+);
+
+final protectedHandler = const shelf.Pipeline()
+    .addMiddleware(
+      bearerAuthenticationMiddleware(
+        validator: bearerValidator,
+        requiredScopes: {'read'},
+        isHttps: true,
+      ),
+    )
+    .addHandler((shelf.Request request) {
+      final token = getAccessTokenFromContext(request)!;
+      return shelf.Response.ok('Authenticated subject: ${token.userId}');
+    });
 ```
+
+---
+
+## 🔒 Production Deployment & Host Security Checklist
+
+While `oauth21` enforces protocol-level invariants automatically, production
+deployments must ensure the surrounding host infrastructure satisfies the
+following OAuth 2.1 requirements:
+
+*   **TLS Termination & `isHttps` Resolution (Section 1.5)**: Always serve
+    authorization, token, and resource endpoints over TLS. Only pass
+    `isHttps: true` when `request.requestedUri.scheme == 'https'` or when a
+    trusted reverse proxy has verified TLS termination.
+*   **Clickjacking Framing Headers on Consent UI (Section 7.11)**: Direct error
+    responses from `handleAuthorizeRequest` automatically include
+    `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`.
+    Any interactive HTML login/consent pages returned by `onConsentRequired`
+    must also include these headers to prevent UI redressing.
+*   **Rate Limiting on Client Authentication & Token Endpoints (Section 2.4.1)**:
+    Enforce brute-force rate limiting and account lockout controls on `/token`
+    and user login endpoints at the API gateway or middleware layer.
+*   **Cryptographically Secure Randomness (Section 7.7)**: Implement
+    `CryptoService.generateRandomEntropyString` using `Random.secure()` with at
+    least 128 bits (and preferably >= 160 bits; 256 bits by default) of entropy.
+*   **Atomic Storage Operations (Sections 4.1.2, 4.1.3 & 4.3.3)**: Implement
+    `AuthCodeRepository.tryConsume`, `TokenRepository.saveIssuedTokens`, and
+    `TokenRepository.rotateRefreshToken` using atomic database transactions or
+    compare-and-set operations so concurrent replay attempts are reliably
+    detected and trigger family revocation.
 
 ---
 
