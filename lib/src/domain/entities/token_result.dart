@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:meta/meta.dart';
 
+import '../abnf_validators.dart';
+
 /// Represents the result of an OAuth 2.1 token exchange request.
 ///
 /// This is a sealed class that is split into [TokenSuccess] and [TokenError].
@@ -11,10 +13,12 @@ sealed class TokenResult {
   /// Parses a token endpoint HTTP response.
   ///
   /// Throws [ArgumentError] if the mandatory `Cache-Control: no-store` header is missing.
-  /// Throws [FormatException] if the body is not valid JSON or lacks mandatory parameters.
+  /// Throws [FormatException] if the body is not valid JSON, lacks mandatory parameters,
+  /// or if [statusCode] conflicts with the response payload type.
   factory TokenResult.fromResponse({
     required String body,
     required Map<String, String> headers,
+    int? statusCode,
   }) {
     // 1. Enforce Response Caching Guardrails
     final cacheControl = headers.entries
@@ -45,6 +49,12 @@ sealed class TokenResult {
 
     // 3. Handle OAuth Error Response
     if (json.containsKey('error')) {
+      if (statusCode != null && statusCode < 400) {
+        throw FormatException(
+          'Invalid HTTP status code $statusCode for token error response; expected >= 400.',
+        );
+      }
+
       final error = json['error'];
       if (error is! String || error.isEmpty) {
         throw const FormatException(
@@ -53,8 +63,7 @@ sealed class TokenResult {
       }
 
       // Enforce strictly ASCII NQSCHAR syntax: %x20-21 / %x23-5B / %x5D-7E
-      final nqscharRegex = RegExp(r'^[\x20-\x21\x23-\x5B\x5D-\x7E]+$');
-      if (!nqscharRegex.hasMatch(error)) {
+      if (!nqscharRequiredRegex.hasMatch(error)) {
         throw const FormatException(
           'Security violation: "error" field contains invalid characters violating ABNF NQSCHAR syntax.',
         );
@@ -64,7 +73,7 @@ sealed class TokenResult {
       if (errorDescription != null) {
         if (errorDescription is! String ||
             (errorDescription.isNotEmpty &&
-                !nqscharRegex.hasMatch(errorDescription))) {
+                !nqscharRequiredRegex.hasMatch(errorDescription))) {
           throw const FormatException(
             'Security violation: "error_description" field contains invalid characters violating ABNF NQSCHAR syntax.',
           );
@@ -73,14 +82,7 @@ sealed class TokenResult {
 
       final errorUri = json['error_uri'];
       if (errorUri != null) {
-        if (errorUri is! String || errorUri.isEmpty) {
-          throw const FormatException(
-            'Invalid "error_uri" field in token error response.',
-          );
-        }
-        final uriRegex = RegExp(r"^[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$");
-        if (!uriRegex.hasMatch(errorUri) ||
-            Uri.tryParse(errorUri)?.isAbsolute != true) {
+        if (errorUri is! String || !isValidErrorUri(errorUri)) {
           throw const FormatException(
             'Security violation: "error_uri" is not a valid absolute URI or contains invalid characters.',
           );
@@ -95,12 +97,18 @@ sealed class TokenResult {
     }
 
     // 4. Handle OAuth Success Response
+    if (statusCode != null && statusCode != 200) {
+      throw FormatException(
+        'Invalid HTTP status code $statusCode for token success response; expected 200.',
+      );
+    }
+
     final accessToken = json['access_token'];
     final tokenType = json['token_type'];
 
-    if (accessToken is! String || accessToken.isEmpty) {
+    if (accessToken is! String || !vscharRequiredRegex.hasMatch(accessToken)) {
       throw const FormatException(
-        'Missing or invalid "access_token" in response.',
+        'Missing or invalid "access_token" in response: must be a non-empty VSCHAR string.',
       );
     }
     if (tokenType is! String || tokenType.isEmpty) {
@@ -124,24 +132,42 @@ sealed class TokenResult {
     int? expiresIn;
     if (json.containsKey('expires_in')) {
       final exp = json['expires_in'];
-      if (exp is int) {
-        expiresIn = exp;
-      } else if (exp is String) {
-        expiresIn = int.tryParse(exp);
-      }
-      if (expiresIn == null) {
+      if (exp is! int || exp <= 0) {
         throw const FormatException(
-          'Invalid "expires_in" parameter in response.',
+          'Invalid "expires_in" parameter in response: must be a positive integer JSON number.',
         );
       }
+      expiresIn = exp;
+    }
+
+    String? refreshToken;
+    if (json.containsKey('refresh_token') && json['refresh_token'] != null) {
+      final rt = json['refresh_token'];
+      if (rt is! String || !vscharRequiredRegex.hasMatch(rt)) {
+        throw const FormatException(
+          'Invalid "refresh_token" parameter in response: must be a non-empty VSCHAR string.',
+        );
+      }
+      refreshToken = rt;
+    }
+
+    String? scope;
+    if (json.containsKey('scope') && json['scope'] != null) {
+      final sc = json['scope'];
+      if (sc is! String || !isValidScopeString(sc, allowEmpty: true)) {
+        throw const FormatException(
+          'Invalid "scope" parameter in response: must be a String of valid NQCHAR scope tokens.',
+        );
+      }
+      scope = sc;
     }
 
     return TokenSuccess(
       accessToken: accessToken,
       tokenType: tokenType,
       expiresIn: expiresIn,
-      refreshToken: json['refresh_token'] as String?,
-      scope: json['scope'] as String?,
+      refreshToken: refreshToken,
+      scope: scope,
       rawPayload: json,
     );
   }

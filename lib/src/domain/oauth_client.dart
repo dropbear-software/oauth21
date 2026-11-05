@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'abnf_validators.dart';
 import 'entities/auth_request.dart';
 import 'entities/token_result.dart';
 import 'ports/oauth_http_client.dart';
@@ -112,6 +113,19 @@ class OAuthClient {
     }
   }
 
+  Map<String, String> _buildTokenRequestHeaders() {
+    final headers = <String, String>{};
+    if (clientSecret != null) {
+      final encodedClientId = Uri.encodeQueryComponent(clientId);
+      final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
+      final credentials = base64.encode(
+        utf8.encode('$encodedClientId:$encodedClientSecret'),
+      );
+      headers['Authorization'] = 'Basic $credentials';
+    }
+    return headers;
+  }
+
   /// Exchanges the authorization [code] for access tokens via back-channel POST.
   ///
   /// - Accepts [redirectUri] if one was bound to the authorization code.
@@ -131,55 +145,97 @@ class OAuthClient {
       body['redirect_uri'] = redirectUri.toString();
     }
 
-    final headers = <String, String>{};
-    if (clientSecret != null) {
-      final encodedClientId = Uri.encodeQueryComponent(clientId);
-      final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
-      final credentials = base64.encode(
-        utf8.encode('$encodedClientId:$encodedClientSecret'),
-      );
-      headers['Authorization'] = 'Basic $credentials';
-    }
-
     final response = await httpClient.post(
       Uri.parse(tokenEndpoint),
-      headers: headers,
+      headers: _buildTokenRequestHeaders(),
       body: body,
     );
 
     return TokenResult.fromResponse(
       body: response.body,
       headers: response.headers,
+      statusCode: response.statusCode,
     );
   }
 
   /// Exchanges a [refreshToken] for a new set of tokens via back-channel POST.
-  Future<TokenResult> exchangeRefreshToken(String refreshToken) async {
+  ///
+  /// Optionally accepts a narrowed [scope] string (OAuth 2.1 Section 4.3.1).
+  Future<TokenResult> exchangeRefreshToken(
+    String refreshToken, {
+    String? scope,
+  }) async {
+    if (!isValidVscharParam(refreshToken)) {
+      throw ArgumentError.value(
+        refreshToken,
+        'refreshToken',
+        'refresh_token must be a non-empty VSCHAR string.',
+      );
+    }
+
     final body = {
       'grant_type': 'refresh_token',
       'refresh_token': refreshToken,
       'client_id': clientId,
     };
 
-    final headers = <String, String>{};
-    if (clientSecret != null) {
-      final encodedClientId = Uri.encodeQueryComponent(clientId);
-      final encodedClientSecret = Uri.encodeQueryComponent(clientSecret!);
-      final credentials = base64.encode(
-        utf8.encode('$encodedClientId:$encodedClientSecret'),
-      );
-      headers['Authorization'] = 'Basic $credentials';
+    if (scope != null) {
+      if (!isValidScopeString(scope)) {
+        throw ArgumentError.value(
+          scope,
+          'scope',
+          'scope must be a space-delimited list of valid NQCHAR scope tokens.',
+        );
+      }
+      body['scope'] = scope;
     }
 
     final response = await httpClient.post(
       Uri.parse(tokenEndpoint),
-      headers: headers,
+      headers: _buildTokenRequestHeaders(),
       body: body,
     );
 
     return TokenResult.fromResponse(
       body: response.body,
       headers: response.headers,
+      statusCode: response.statusCode,
+    );
+  }
+
+  /// Requests an access token using the Client Credentials grant (OAuth 2.1 Section 4.2).
+  ///
+  /// Requires a confidential client configured with a non-empty [clientSecret].
+  Future<TokenResult> exchangeClientCredentials({String? scope}) async {
+    if (clientSecret == null || clientSecret!.isEmpty) {
+      throw StateError(
+        'Client credentials grant requires a confidential client with a non-empty clientSecret.',
+      );
+    }
+
+    final body = <String, String>{'grant_type': 'client_credentials'};
+
+    if (scope != null) {
+      if (!isValidScopeString(scope)) {
+        throw ArgumentError.value(
+          scope,
+          'scope',
+          'scope must be a space-delimited list of valid NQCHAR scope tokens.',
+        );
+      }
+      body['scope'] = scope;
+    }
+
+    final response = await httpClient.post(
+      Uri.parse(tokenEndpoint),
+      headers: _buildTokenRequestHeaders(),
+      body: body,
+    );
+
+    return TokenResult.fromResponse(
+      body: response.body,
+      headers: response.headers,
+      statusCode: response.statusCode,
     );
   }
 }

@@ -354,6 +354,122 @@ void main() {
           );
         },
       );
+
+      test(
+        'should reject mismatched HTTP status codes in exchangeCode response (#7)',
+        () {
+          final httpClient = MockOAuthHttpClient((url, headers, body) async {
+            return const OAuthHttpResponse(
+              statusCode: 200,
+              body: '{"error": "invalid_grant"}',
+              headers: {'Cache-Control': 'no-store'},
+            );
+          });
+
+          final client = OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            httpClient: httpClient,
+          );
+
+          expect(
+            () => client.exchangeCode(
+              code: 'auth-code',
+              codeVerifier: codeVerifier,
+            ),
+            throwsFormatException,
+          );
+        },
+      );
+    });
+
+    group('exchangeRefreshToken & exchangeClientCredentials (#7)', () {
+      test(
+        'exchangeRefreshToken should send optional scope and validate refreshToken and scope ABNF',
+        () async {
+          final httpClient = MockOAuthHttpClient((url, headers, body) async {
+            expect(body['grant_type'], equals('refresh_token'));
+            expect(body['refresh_token'], equals('valid-refresh-token'));
+            expect(body['scope'], equals('read'));
+            return const OAuthHttpResponse(
+              statusCode: 200,
+              body: '{"access_token": "t1", "token_type": "Bearer"}',
+              headers: {'Cache-Control': 'no-store'},
+            );
+          });
+
+          final client = OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            httpClient: httpClient,
+          );
+
+          final res = await client.exchangeRefreshToken(
+            'valid-refresh-token',
+            scope: 'read',
+          );
+          expect(res, isA<TokenSuccess>());
+
+          expect(() => client.exchangeRefreshToken(''), throwsArgumentError);
+          expect(
+            () => client.exchangeRefreshToken('bad\ntoken'),
+            throwsArgumentError,
+          );
+          expect(
+            () => client.exchangeRefreshToken(
+              'valid-refresh-token',
+              scope: 'read  write',
+            ),
+            throwsArgumentError,
+          );
+        },
+      );
+
+      test(
+        'exchangeClientCredentials should authenticate via Basic Auth, support optional scope, and throw StateError for public clients',
+        () async {
+          final httpClient = MockOAuthHttpClient((url, headers, body) async {
+            expect(body['grant_type'], equals('client_credentials'));
+            expect(body['scope'], equals('read write'));
+            expect(headers['Authorization'], startsWith('Basic '));
+            return const OAuthHttpResponse(
+              statusCode: 200,
+              body: '{"access_token": "cc-token", "token_type": "Bearer"}',
+              headers: {'Cache-Control': 'no-store'},
+            );
+          });
+
+          final confidentialClient = OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            clientSecret: 'secret-456',
+            httpClient: httpClient,
+          );
+
+          final res = await confidentialClient.exchangeClientCredentials(
+            scope: 'read write',
+          );
+          expect(res, isA<TokenSuccess>());
+
+          expect(
+            () => confidentialClient.exchangeClientCredentials(
+              scope: 'invalid"scope',
+            ),
+            throwsArgumentError,
+          );
+
+          final publicClient = OAuthClient(
+            authorizationEndpoint: authEndpoint,
+            tokenEndpoint: tokenEndpoint,
+            clientId: clientId,
+            httpClient: httpClient,
+          );
+          expect(publicClient.exchangeClientCredentials, throwsStateError);
+        },
+      );
     });
   });
 
