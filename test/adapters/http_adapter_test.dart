@@ -81,6 +81,28 @@ void main() {
     );
 
     test(
+      'should reject non-HTTP schemes on loopback and URIs containing userinfo or fragments',
+      () {
+        final mockClient = MockClient(
+          (request) async => http.Response('{}', 200),
+        );
+        final adapter = HttpAdapter(mockClient);
+
+        for (final badUri in [
+          'ftp://localhost/token',
+          'https://user:pass@example.com/token',
+          'https://example.com/token#frag',
+        ]) {
+          expect(
+            () => adapter.post(Uri.parse(badUri), body: {'code': '123'}),
+            throwsArgumentError,
+            reason: 'Expected $badUri to be rejected',
+          );
+        }
+      },
+    );
+
+    test(
       'should transparently propagate non-200 error status codes and error payloads to the domain layer',
       () async {
         final mockClient = MockClient((request) async {

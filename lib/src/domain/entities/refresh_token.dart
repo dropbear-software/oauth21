@@ -27,6 +27,10 @@ class RefreshToken {
   /// Whether the token was already re-used within the rotation grace window.
   final bool usedInGraceWindow;
 
+  /// The originating authorization code grant, if issued via an authorization
+  /// code or rotated from a refresh token descended from an authorization code.
+  final String? authorizationCode;
+
   /// Creates a new [RefreshToken] instance.
   const RefreshToken({
     required this.tokenHash,
@@ -37,6 +41,7 @@ class RefreshToken {
     this.isRevoked = false,
     this.revokedAt,
     this.usedInGraceWindow = false,
+    this.authorizationCode,
   });
 
   /// Returns whether this refresh token is expired.
@@ -55,6 +60,7 @@ class RefreshToken {
     bool? isRevoked,
     DateTime? revokedAt,
     bool? usedInGraceWindow,
+    String? authorizationCode,
   }) {
     return RefreshToken(
       tokenHash: tokenHash ?? this.tokenHash,
@@ -65,6 +71,7 @@ class RefreshToken {
       isRevoked: isRevoked ?? this.isRevoked,
       revokedAt: revokedAt ?? this.revokedAt,
       usedInGraceWindow: usedInGraceWindow ?? this.usedInGraceWindow,
+      authorizationCode: authorizationCode ?? this.authorizationCode,
     );
   }
 }

@@ -10,11 +10,11 @@ abstract interface class AuthCodeRepository {
   /// Returns `null` if the code does not exist.
   Future<AuthCode?> findByCode(String code);
 
-  /// Marks the authorization code as used to prevent token replay attacks.
-  Future<void> markAsUsed(String code);
-
-  /// Revokes all access and refresh tokens previously issued by this code.
+  /// Atomically marks the authorization code as used (Compare-And-Swap from
+  /// `isUsed == false` to `isUsed == true`) to prevent concurrent token replay
+  /// attacks.
   ///
-  /// This is used for cascade revocation when a code reuse attempt is detected.
-  Future<void> revokeTokensForCode(String code);
+  /// Returns `true` for the single caller that wins the transition, or `false`
+  /// if the authorization code does not exist or has already been consumed.
+  Future<bool> tryConsume(String code);
 }

@@ -61,6 +61,48 @@ void main() {
       );
 
       test(
+        'should reject dangerous and malformed redirect URI schemes while accepting valid HTTPS, loopback HTTP, and reverse-domain private-use schemes',
+        () {
+          for (final badUri in [
+            'javascript:alert(1)',
+            'data:text/html,hi',
+            'file:///etc/passwd',
+            'http://example.com/cb',
+            'https://user:pass@example.com/cb',
+            'myapp:/cb',
+            'app.:/cb',
+            'com..app:/cb',
+          ]) {
+            expect(
+              () => ClientRegistration(
+                clientId: 'client-123',
+                clientType: ClientType.confidential,
+                clientSecretHash: 'hash',
+                redirectUris: {Uri.parse(badUri)},
+                allowedScopes: {'read'},
+              ),
+              throwsArgumentError,
+              reason: 'Expected $badUri to be rejected',
+            );
+          }
+
+          final validClient = ClientRegistration(
+            clientId: 'client-123',
+            clientType: ClientType.public,
+            redirectUris: {
+              Uri.parse('https://example.com/cb'),
+              Uri.parse('http://localhost:8080/cb'),
+              Uri.parse('http://127.0.0.1:8080/cb'),
+              Uri.parse('http://[::1]:8080/cb'),
+              Uri.parse('com.example.app:/cb'),
+            },
+            allowedScopes: {'read'},
+          );
+          expect(validClient.redirectUris.length, equals(5));
+        },
+      );
+
+      test(
         'should enforce strict immutability on configuration collections',
         () {
           final client = ClientRegistration(
@@ -296,6 +338,18 @@ void main() {
           ),
           throwsArgumentError,
         );
+        expect(
+          () => AuthCode(
+            code: 'valid-code-123',
+            clientId: 'client-1',
+            redirectUri: Uri.parse('https://example.com/cb'),
+            userId: 'user-1',
+            codeChallenge: 'challenge-1',
+            codeChallengeMethod: 'plain', // Removed in OAuth 2.1
+            expiresAt: future,
+          ),
+          throwsArgumentError,
+        );
       });
 
       test('should copyWith correctly', () {
@@ -309,14 +363,10 @@ void main() {
           expiresAt: future,
         );
 
-        final modified = original.copyWith(
-          isUsed: true,
-          issuedTokenIds: ['token-1'],
-        );
+        final modified = original.copyWith(isUsed: true);
 
         expect(modified.code, equals('code-1'));
         expect(modified.isUsed, isTrue);
-        expect(modified.issuedTokenIds, contains('token-1'));
 
         final unchanged = original.copyWith();
         expect(unchanged.code, equals(original.code));
@@ -331,7 +381,6 @@ void main() {
         );
         expect(unchanged.expiresAt, equals(original.expiresAt));
         expect(unchanged.isUsed, equals(original.isUsed));
-        expect(unchanged.issuedTokenIds, equals(original.issuedTokenIds));
       });
 
       test(
@@ -385,12 +434,14 @@ void main() {
           tokenHash: 'hash-1',
           clientId: 'client-1',
           expiresAt: future,
+          authorizationCode: 'code-123',
         );
 
         final modified = original.copyWith(isRevoked: true);
 
         expect(modified.tokenHash, equals('hash-1'));
         expect(modified.isRevoked, isTrue);
+        expect(modified.authorizationCode, equals('code-123'));
 
         final unchanged = original.copyWith();
         expect(unchanged.tokenHash, equals(original.tokenHash));
@@ -399,6 +450,7 @@ void main() {
         expect(unchanged.scope, equals(original.scope));
         expect(unchanged.expiresAt, equals(original.expiresAt));
         expect(unchanged.isRevoked, equals(original.isRevoked));
+        expect(unchanged.authorizationCode, equals(original.authorizationCode));
       });
 
       test(
@@ -448,12 +500,14 @@ void main() {
           tokenHash: 'hash-1',
           clientId: 'client-1',
           expiresAt: future,
+          authorizationCode: 'code-123',
         );
 
         final modified = original.copyWith(isRevoked: true);
 
         expect(modified.tokenHash, equals('hash-1'));
         expect(modified.isRevoked, isTrue);
+        expect(modified.authorizationCode, equals('code-123'));
 
         final unchanged = original.copyWith();
         expect(unchanged.tokenHash, equals(original.tokenHash));
@@ -464,6 +518,7 @@ void main() {
         expect(unchanged.isRevoked, equals(original.isRevoked));
         expect(unchanged.revokedAt, equals(original.revokedAt));
         expect(unchanged.usedInGraceWindow, equals(original.usedInGraceWindow));
+        expect(unchanged.authorizationCode, equals(original.authorizationCode));
       });
 
       test('should support grace window properties', () {

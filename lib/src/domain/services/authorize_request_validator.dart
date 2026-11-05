@@ -1,5 +1,6 @@
 import '../entities/client_registration.dart';
 import '../ports/client_repository.dart';
+import '../redirect_uri_policy.dart';
 
 /// The result of validating an authorization request.
 class AuthorizeValidationResult {
@@ -127,6 +128,14 @@ class AuthorizeRequestValidator {
     if (redirectUris.isEmpty || redirectUris.first.isEmpty) {
       if (client.redirectUris.length == 1) {
         validatedRedirectUri = client.redirectUris.first;
+        if (!isAllowedRedirectUri(validatedRedirectUri)) {
+          return const AuthorizeValidationResult.invalid(
+            isRedirectable: false,
+            errorCode: 'invalid_request',
+            errorDescription:
+                'The redirect_uri is not an allowed OAuth 2.1 redirect URI.',
+          );
+        }
       } else {
         return const AuthorizeValidationResult.invalid(
           isRedirectable: false,
@@ -148,7 +157,8 @@ class AuthorizeRequestValidator {
         );
       }
 
-      if (!_isRedirectUriAllowed(client, validatedRedirectUri)) {
+      if (!isAllowedRedirectUri(validatedRedirectUri) ||
+          !_isRedirectUriAllowed(client, validatedRedirectUri)) {
         return const AuthorizeValidationResult.invalid(
           isRedirectable: false,
           errorCode: 'invalid_request',
@@ -269,13 +279,11 @@ class AuthorizeRequestValidator {
       );
     }
     final codeChallengeMethod = codeChallengeMethods.first;
-    if (codeChallengeMethod != 'S256' && codeChallengeMethod != 'plain') {
+    if (codeChallengeMethod != 'S256') {
       return AuthorizeValidationResult.invalid(
         isRedirectable: true,
         errorCode: 'invalid_request',
-        errorDescription:
-            'Unsupported code_challenge_method. Only S256 and plain '
-            'are supported.',
+        errorDescription: 'The code_challenge_method must be "S256".',
         client: client,
         validatedRedirectUri: validatedRedirectUri,
         state: state,
@@ -340,28 +348,28 @@ class AuthorizeRequestValidator {
   }
 
   bool _isRedirectUriAllowed(ClientRegistration client, Uri requestedUri) {
+    if (!isAllowedRedirectUri(requestedUri)) {
+      return false;
+    }
     final reqNormalized = requestedUri.normalizePath();
     for (final registeredUri in client.redirectUris) {
+      if (!isAllowedRedirectUri(registeredUri)) {
+        continue;
+      }
       final regNormalized = registeredUri.normalizePath();
       if (regNormalized == reqNormalized) {
         return true;
       }
-      if (_isLoopback(regNormalized) && _isLoopback(reqNormalized)) {
+      if (regNormalized.scheme == 'http' &&
+          isLoopbackHost(regNormalized.host) &&
+          reqNormalized.scheme == 'http' &&
+          isLoopbackHost(reqNormalized.host)) {
         if (_matchLoopback(regNormalized, reqNormalized)) {
           return true;
         }
       }
     }
     return false;
-  }
-
-  bool _isLoopback(Uri uri) {
-    if (uri.scheme != 'http') return false;
-    final host = uri.host.toLowerCase();
-    return host == '127.0.0.1' ||
-        host == '::1' ||
-        host == '[::1]' ||
-        host == 'localhost';
   }
 
   bool _matchLoopback(Uri registered, Uri requested) {

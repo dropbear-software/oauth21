@@ -30,9 +30,6 @@ class AuthCode {
   /// Whether this authorization code has been used to request tokens.
   final bool isUsed;
 
-  /// List of token IDs/hashes issued by this code.
-  final List<String> issuedTokenIds;
-
   /// Creates a new [AuthCode] instance.
   AuthCode({
     required this.code,
@@ -44,7 +41,6 @@ class AuthCode {
     required this.expiresAt,
     this.scope,
     this.isUsed = false,
-    this.issuedTokenIds = const [],
   }) {
     final vscharRequiredRegex = RegExp(r'^[\x20-\x7E]+$');
     if (code.isEmpty ||
@@ -65,10 +61,11 @@ class AuthCode {
       );
     }
 
-    const allowedMethods = {'S256', 'plain'};
-    if (!allowedMethods.contains(codeChallengeMethod)) {
-      throw ArgumentError(
-        'Unsupported codeChallengeMethod "$codeChallengeMethod". Only S256 and plain are supported.',
+    if (codeChallengeMethod != 'S256') {
+      throw ArgumentError.value(
+        codeChallengeMethod,
+        'codeChallengeMethod',
+        'codeChallengeMethod must be "S256".',
       );
     }
   }
@@ -90,7 +87,6 @@ class AuthCode {
     String? codeChallengeMethod,
     DateTime? expiresAt,
     bool? isUsed,
-    List<String>? issuedTokenIds,
   }) {
     return AuthCode(
       code: code ?? this.code,
@@ -102,7 +98,6 @@ class AuthCode {
       codeChallengeMethod: codeChallengeMethod ?? this.codeChallengeMethod,
       expiresAt: expiresAt ?? this.expiresAt,
       isUsed: isUsed ?? this.isUsed,
-      issuedTokenIds: issuedTokenIds ?? this.issuedTokenIds,
     );
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:oauth21/oauth21.dart';
@@ -52,15 +53,14 @@ class FakeAuthCodeRepository implements AuthCodeRepository {
   }
 
   @override
-  Future<void> markAsUsed(String code) async {
+  Future<bool> tryConsume(String code) async {
     final authCode = codes[code];
-    if (authCode != null) {
-      codes[code] = authCode.copyWith(isUsed: true);
+    if (authCode == null || authCode.isUsed || authCode.isExpired) {
+      return false;
     }
+    codes[code] = authCode.copyWith(isUsed: true);
+    return true;
   }
-
-  @override
-  Future<void> revokeTokensForCode(String code) async {}
 }
 
 class FakeTokenRepository implements TokenRepository {
@@ -69,6 +69,27 @@ class FakeTokenRepository implements TokenRepository {
 
   @override
   Future<void> saveRefreshToken(RefreshToken token) async {}
+
+  @override
+  Future<bool> saveIssuedTokens({
+    required AccessToken accessToken,
+    RefreshToken? refreshToken,
+  }) async {
+    return true;
+  }
+
+  @override
+  Future<bool> rotateRefreshToken({
+    required String oldTokenHash,
+    required AccessToken newAccessToken,
+    required RefreshToken newRefreshToken,
+    Duration graceWindow = const Duration(seconds: 30),
+  }) async {
+    return true;
+  }
+
+  @override
+  Future<void> revokeByAuthorizationCode(String authorizationCode) async {}
 
   @override
   Future<AccessToken?> findAccessTokenByHash(String hashedValue) async {
@@ -251,15 +272,35 @@ void main() {
     });
 
     group('handleTokenRequest', () {
-      test('should reject non-POST request', () async {
+      test('should reject request when isHttps is omitted (defaults to false)', () async {
+        final req = shelf.Request(
+          'POST',
+          Uri.parse('https://auth.example.com/token'),
+          headers: {'content-type': 'application/x-www-form-urlencoded'},
+          body: 'grant_type=client_credentials&client_id=client-123&client_secret=secret-123',
+        );
+
+        final res = await handleTokenRequest(req, handler: tokenHandler);
+        expect(res.statusCode, equals(400));
+        expect(res.headers['cache-control'], equals('no-store'));
+        expect(res.headers['pragma'], equals('no-cache'));
+      });
+
+      test('should reject non-POST request with no-store headers', () async {
         final req = shelf.Request(
           'GET',
           Uri.parse('https://auth.example.com/token'),
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
 
         expect(res.statusCode, equals(400));
+        expect(res.headers['cache-control'], equals('no-store'));
+        expect(res.headers['pragma'], equals('no-cache'));
         final body =
             jsonDecode(await res.readAsString()) as Map<String, dynamic>;
         expect(body['error'], equals('invalid_request'));
@@ -273,9 +314,15 @@ void main() {
           body: jsonEncode({'grant_type': 'client_credentials'}),
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
 
         expect(res.statusCode, equals(400));
+        expect(res.headers['cache-control'], equals('no-store'));
+        expect(res.headers['pragma'], equals('no-cache'));
         final body =
             jsonDecode(await res.readAsString()) as Map<String, dynamic>;
         expect(body['error'], equals('invalid_request'));
@@ -293,7 +340,11 @@ void main() {
               'scope=read',
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
 
         expect(res.statusCode, equals(200));
         expect(res.headers['cache-control'], equals('no-store'));
@@ -318,7 +369,11 @@ void main() {
               'client_secret=wrong-secret',
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
 
         expect(res.statusCode, equals(401));
         final body =
@@ -327,7 +382,7 @@ void main() {
       });
 
       test('should reject token request body containing parameter '
-          'pollution / duplicate keys', () async {
+          'pollution / duplicate keys with no-store headers', () async {
         final req = shelf.Request(
           'POST',
           Uri.parse('https://auth.example.com/token'),
@@ -337,8 +392,14 @@ void main() {
               'grant_type=authorization_code',
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
         expect(res.statusCode, equals(400));
+        expect(res.headers['cache-control'], equals('no-store'));
+        expect(res.headers['pragma'], equals('no-cache'));
 
         final json =
             jsonDecode(await res.readAsString()) as Map<String, dynamic>;
@@ -360,8 +421,14 @@ void main() {
           body: hugeJunkPayload,
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
         expect(res.statusCode, equals(400));
+        expect(res.headers['cache-control'], equals('no-store'));
+        expect(res.headers['pragma'], equals('no-cache'));
 
         final json =
             jsonDecode(await res.readAsString()) as Map<String, dynamic>;
@@ -370,24 +437,84 @@ void main() {
       });
 
       test(
-        'should reject stream payload if size exceeds safe limits',
+        'should abort chunked stream payload mid-stream if size exceeds 10,240 bytes',
         () async {
-          final hugeJunkPayload =
-              'grant_type=client_credentials&data=${'A' * 15000}';
+          var thirdChunkRead = false;
+          Stream<List<int>> chunkedStream() async* {
+            yield List<int>.filled(6000, 65);
+            yield List<int>.filled(6000, 65); // Exceeds 10,240 bytes here
+            thirdChunkRead = true;
+            yield List<int>.filled(6000, 65);
+          }
+
           final req = shelf.Request(
             'POST',
             Uri.parse('https://auth.example.com/token'),
             headers: {'content-type': 'application/x-www-form-urlencoded'},
-            body: Stream.value(utf8.encode(hugeJunkPayload)),
+            body: chunkedStream(),
           );
 
-          final res = await handleTokenRequest(req, handler: tokenHandler);
+          final res = await handleTokenRequest(
+            req,
+            handler: tokenHandler,
+            isHttps: true,
+          );
           expect(res.statusCode, equals(400));
+          expect(thirdChunkRead, isFalse);
+          expect(res.headers['cache-control'], equals('no-store'));
+          expect(res.headers['pragma'], equals('no-cache'));
 
           final json =
               jsonDecode(await res.readAsString()) as Map<String, dynamic>;
           expect(json['error'], equals('invalid_request'));
           expect(json['error_description'], contains('Payload too large'));
+        },
+      );
+
+      test(
+        'should reject malformed Content-Length, invalid UTF-8 bytes, and malformed percent-encoding without throwing 500',
+        () async {
+          final badContentLengthReq = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/token'),
+            headers: {
+              'content-type': 'application/x-www-form-urlencoded',
+              'content-length': '-5',
+            },
+            body: 'grant_type=client_credentials',
+          );
+          final resBadLen = await handleTokenRequest(
+            badContentLengthReq,
+            handler: tokenHandler,
+            isHttps: true,
+          );
+          expect(resBadLen.statusCode, equals(400));
+
+          final invalidUtf8Req = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/token'),
+            headers: {'content-type': 'application/x-www-form-urlencoded'},
+            body: Stream.value(<int>[0xFF, 0xFE, 0xFD]),
+          );
+          final resInvalidUtf8 = await handleTokenRequest(
+            invalidUtf8Req,
+            handler: tokenHandler,
+            isHttps: true,
+          );
+          expect(resInvalidUtf8.statusCode, equals(400));
+
+          final badPercentReq = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/token'),
+            headers: {'content-type': 'application/x-www-form-urlencoded'},
+            body: 'grant_type=%ZZ&client_id=client-123',
+          );
+          final resBadPercent = await handleTokenRequest(
+            badPercentReq,
+            handler: tokenHandler,
+            isHttps: true,
+          );
+          expect(resBadPercent.statusCode, equals(400));
         },
       );
 
@@ -399,7 +526,11 @@ void main() {
           body: 'grant_type=client_credentials&client_id=client-123&nopair',
         );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
+        final res = await handleTokenRequest(
+          req,
+          handler: tokenHandler,
+          isHttps: true,
+        );
         expect(res.statusCode, isNot(equals(500)));
       });
     });

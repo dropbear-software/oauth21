@@ -5,14 +5,13 @@ import 'code_verifier.dart';
 
 /// A code challenge derived from a [CodeVerifier] using a cryptographic transform.
 ///
-/// Under OAuth 2.1, the code challenge method must default to `S256`.
-/// The insecure `plain` method is blocked unless an explicit opt-in is provided.
+/// Under OAuth 2.1, only the `S256` code challenge method is permitted.
 @immutable
 class CodeChallenge {
   /// The derived challenge string value.
   final String value;
 
-  /// The transformation method used (`S256` or `plain`).
+  /// The transformation method used (`S256`).
   final String method;
 
   const CodeChallenge._(this.value, this.method);
@@ -27,22 +26,6 @@ class CodeChallenge {
     // base64Url.encode generates URL-safe base64, but we must strip any trailing '=' padding
     final challenge = base64Url.encode(hash.bytes).replaceAll('=', '');
     return CodeChallenge._(challenge, 'S256');
-  }
-
-  /// Computes a [CodeChallenge] using the `plain` transformation method.
-  ///
-  /// [allowPlain] must be set to `true` to opt-in, otherwise this throws [ArgumentError].
-  factory CodeChallenge.plain(
-    CodeVerifier verifier, {
-    required bool allowPlain,
-  }) {
-    if (!allowPlain) {
-      throw ArgumentError(
-        'The plain code challenge method is insecure and blocked by default under OAuth 2.1. '
-        'Provide explicit permission (allowPlain: true) to enable it.',
-      );
-    }
-    return CodeChallenge._(verifier.value, 'plain');
   }
 
   @override

@@ -43,27 +43,6 @@ void main() {
       );
     });
 
-    group('plain method', () {
-      test('should throw if allowPlain is false', () {
-        final verifier = CodeVerifier(rfcVerifier);
-        expect(
-          () => CodeChallenge.plain(verifier, allowPlain: false),
-          throwsArgumentError,
-        );
-      });
-
-      test(
-        'should succeed and match verifier value when allowPlain is true',
-        () {
-          final verifier = CodeVerifier(rfcVerifier);
-          final challenge = CodeChallenge.plain(verifier, allowPlain: true);
-
-          expect(challenge.method, equals('plain'));
-          expect(challenge.value, equals(rfcVerifier));
-        },
-      );
-    });
-
     group('equality & representations', () {
       test('should support value equality and hashCode', () {
         final verifier = CodeVerifier(rfcVerifier);

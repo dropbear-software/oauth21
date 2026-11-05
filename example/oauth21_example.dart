@@ -16,7 +16,7 @@ void main() async {
   // Initialize in-memory servers and databases
   final clientRepo = InMemoryClientRepository();
   final tokenRepo = InMemoryTokenRepository();
-  final authCodeRepo = InMemoryAuthCodeRepository(tokenRepo);
+  final authCodeRepo = InMemoryAuthCodeRepository();
   final cryptoService = SHA256CryptoService();
 
   // Register public client (no secret, supports auth code and refresh token)
@@ -76,7 +76,11 @@ void main() async {
       );
     } else if (request.method == 'POST' && path == 'token') {
       // We set isHttps to true to simulate production TLS-terminated requests
-      return handleTokenRequest(request, handler: tokenRequestHandler);
+      return handleTokenRequest(
+        request,
+        handler: tokenRequestHandler,
+        isHttps: true,
+      );
     } else {
       return shelf.Response.notFound('Not Found');
     }
@@ -240,9 +244,6 @@ class InMemoryClientRepository implements ClientRepository {
 
 class InMemoryAuthCodeRepository implements AuthCodeRepository {
   final Map<String, AuthCode> _codes = {};
-  final InMemoryTokenRepository tokenRepository;
-
-  InMemoryAuthCodeRepository(this.tokenRepository);
 
   @override
   Future<AuthCode?> findByCode(String code) async {
@@ -255,32 +256,20 @@ class InMemoryAuthCodeRepository implements AuthCodeRepository {
   }
 
   @override
-  Future<void> markAsUsed(String code) async {
+  Future<bool> tryConsume(String code) async {
     final existing = _codes[code];
-    if (existing != null) {
-      _codes[code] = existing.copyWith(isUsed: true);
+    if (existing == null || existing.isUsed) {
+      return false;
     }
-  }
-
-  @override
-  Future<void> revokeTokensForCode(String code) async {
-    await tokenRepository.revokeAll();
+    _codes[code] = existing.copyWith(isUsed: true);
+    return true;
   }
 }
 
 class InMemoryTokenRepository implements TokenRepository {
   final Map<String, AccessToken> _accessTokens = {};
   final Map<String, RefreshToken> _refreshTokens = {};
-
-  Future<void> revokeAll() async {
-    _accessTokens.clear();
-    for (final entry in _refreshTokens.entries) {
-      _refreshTokens[entry.key] = entry.value.copyWith(
-        isRevoked: true,
-        revokedAt: DateTime.now(),
-      );
-    }
-  }
+  final Set<String> _compromisedAuthCodes = {};
 
   @override
   Future<void> saveAccessToken(AccessToken token) async {
@@ -290,6 +279,92 @@ class InMemoryTokenRepository implements TokenRepository {
   @override
   Future<void> saveRefreshToken(RefreshToken token) async {
     _refreshTokens[token.tokenHash] = token;
+  }
+
+  @override
+  Future<bool> saveIssuedTokens({
+    required AccessToken accessToken,
+    RefreshToken? refreshToken,
+  }) async {
+    final code = accessToken.authorizationCode;
+    if (code != null && _compromisedAuthCodes.contains(code)) {
+      _accessTokens[accessToken.tokenHash] = accessToken.copyWith(
+        isRevoked: true,
+      );
+      if (refreshToken != null) {
+        _refreshTokens[refreshToken.tokenHash] = refreshToken.copyWith(
+          isRevoked: true,
+          revokedAt: DateTime.now(),
+          usedInGraceWindow: true,
+        );
+      }
+      return false;
+    }
+    _accessTokens[accessToken.tokenHash] = accessToken;
+    if (refreshToken != null) {
+      _refreshTokens[refreshToken.tokenHash] = refreshToken;
+    }
+    return true;
+  }
+
+  @override
+  Future<bool> rotateRefreshToken({
+    required String oldTokenHash,
+    required AccessToken newAccessToken,
+    required RefreshToken newRefreshToken,
+    Duration graceWindow = const Duration(seconds: 30),
+  }) async {
+    final existing = _refreshTokens[oldTokenHash];
+    if (existing == null || existing.isExpired) {
+      return false;
+    }
+    final code = existing.authorizationCode;
+    if (code != null && _compromisedAuthCodes.contains(code)) {
+      return false;
+    }
+
+    if (!existing.isRevoked) {
+      _refreshTokens[oldTokenHash] = existing.copyWith(
+        isRevoked: true,
+        revokedAt: DateTime.now(),
+        usedInGraceWindow: false,
+      );
+    } else {
+      final revokedAt = existing.revokedAt;
+      final withinGrace =
+          !existing.usedInGraceWindow &&
+          revokedAt != null &&
+          DateTime.now().difference(revokedAt) <= graceWindow;
+      if (!withinGrace) {
+        return false;
+      }
+      _refreshTokens[oldTokenHash] = existing.copyWith(
+        usedInGraceWindow: true,
+      );
+    }
+
+    _accessTokens[newAccessToken.tokenHash] = newAccessToken;
+    _refreshTokens[newRefreshToken.tokenHash] = newRefreshToken;
+    return true;
+  }
+
+  @override
+  Future<void> revokeByAuthorizationCode(String authorizationCode) async {
+    _compromisedAuthCodes.add(authorizationCode);
+    for (final entry in _accessTokens.entries) {
+      if (entry.value.authorizationCode == authorizationCode) {
+        _accessTokens[entry.key] = entry.value.copyWith(isRevoked: true);
+      }
+    }
+    for (final entry in _refreshTokens.entries) {
+      if (entry.value.authorizationCode == authorizationCode) {
+        _refreshTokens[entry.key] = entry.value.copyWith(
+          isRevoked: true,
+          revokedAt: entry.value.revokedAt ?? DateTime.now(),
+          usedInGraceWindow: true,
+        );
+      }
+    }
   }
 
   @override
@@ -308,7 +383,7 @@ class InMemoryTokenRepository implements TokenRepository {
     if (existing != null) {
       _refreshTokens[hash] = existing.copyWith(
         isRevoked: true,
-        revokedAt: DateTime.now(),
+        revokedAt: existing.revokedAt ?? DateTime.now(),
       );
     }
   }
@@ -318,7 +393,20 @@ class InMemoryTokenRepository implements TokenRepository {
     String clientId,
     String? userId,
   ) async {
-    await revokeAll();
+    for (final entry in _accessTokens.entries) {
+      if (entry.value.clientId == clientId && entry.value.userId == userId) {
+        _accessTokens[entry.key] = entry.value.copyWith(isRevoked: true);
+      }
+    }
+    for (final entry in _refreshTokens.entries) {
+      if (entry.value.clientId == clientId && entry.value.userId == userId) {
+        _refreshTokens[entry.key] = entry.value.copyWith(
+          isRevoked: true,
+          revokedAt: entry.value.revokedAt ?? DateTime.now(),
+          usedInGraceWindow: true,
+        );
+      }
+    }
   }
 }
 

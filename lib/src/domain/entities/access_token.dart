@@ -21,6 +21,10 @@ class AccessToken {
   /// Whether the access token has been explicitly revoked.
   final bool isRevoked;
 
+  /// The originating authorization code grant, if issued via an authorization
+  /// code or a refresh token descended from an authorization code.
+  final String? authorizationCode;
+
   /// Creates a new [AccessToken] instance.
   const AccessToken({
     required this.tokenHash,
@@ -29,6 +33,7 @@ class AccessToken {
     this.userId,
     this.scope,
     this.isRevoked = false,
+    this.authorizationCode,
   });
 
   /// Returns whether this access token is expired.
@@ -45,6 +50,7 @@ class AccessToken {
     String? scope,
     DateTime? expiresAt,
     bool? isRevoked,
+    String? authorizationCode,
   }) {
     return AccessToken(
       tokenHash: tokenHash ?? this.tokenHash,
@@ -53,6 +59,7 @@ class AccessToken {
       scope: scope ?? this.scope,
       expiresAt: expiresAt ?? this.expiresAt,
       isRevoked: isRevoked ?? this.isRevoked,
+      authorizationCode: authorizationCode ?? this.authorizationCode,
     );
   }
 }

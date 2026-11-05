@@ -58,7 +58,7 @@ class TokenRequestHandler {
   Future<ServerTokenResponse> handle(
     Map<String, String> body, {
     String? authorizationHeader,
-    bool isHttps = true,
+    bool isHttps = false,
   }) async {
     // 1. Enforce Transport Security (TLS)
     if (!isHttps) {
@@ -300,15 +300,21 @@ class TokenRequestHandler {
       );
     }
 
-    // Enforce PKCE verifier check
-    final String challengeCheck;
-    if (authCode.codeChallengeMethod == 'S256') {
-      challengeCheck = cryptoService.hashAndBase64UrlEncode(codeVerifier);
-    } else {
-      challengeCheck = codeVerifier;
+    // Enforce PKCE verifier check (OAuth 2.1 requires S256 exclusively)
+    if (authCode.codeChallengeMethod != 'S256') {
+      return const ServerTokenResponse(
+        statusCode: 400,
+        body: {
+          'error': 'invalid_grant',
+          'error_description':
+              'Only S256 code_challenge_method is supported in OAuth 2.1.',
+        },
+        headers: _headers,
+      );
     }
 
-    if (challengeCheck != authCode.codeChallenge) {
+    final challengeCheck = cryptoService.hashAndBase64UrlEncode(codeVerifier);
+    if (!CryptoService.safeEquals(challengeCheck, authCode.codeChallenge)) {
       return const ServerTokenResponse(
         statusCode: 400,
         body: {
@@ -319,14 +325,18 @@ class TokenRequestHandler {
       );
     }
 
-    // Code reuse check (Must revoke everything issued by it)
+    // Code reuse check (Must revoke everything issued by it, even if expired)
     if (authCode.isUsed) {
-      await authCodeRepository.revokeTokensForCode(code);
+      await _revokeCompromisedCodeFamily(
+        code: code,
+        clientId: authCode.clientId,
+        userId: authCode.userId,
+      );
       return const ServerTokenResponse(
         statusCode: 400,
         body: {
           'error': 'invalid_grant',
-          'error_description': 'Authorization code already used.',
+          'error_description': 'Authorization code has already been used.',
         },
         headers: _headers,
       );
@@ -344,16 +354,53 @@ class TokenRequestHandler {
       );
     }
 
-    // Mark as used
-    await authCodeRepository.markAsUsed(code);
+    // Atomically consume authorization code (Compare-And-Swap false -> true)
+    final consumed = await authCodeRepository.tryConsume(code);
+    if (!consumed) {
+      await _revokeCompromisedCodeFamily(
+        code: code,
+        clientId: authCode.clientId,
+        userId: authCode.userId,
+      );
+      return const ServerTokenResponse(
+        statusCode: 400,
+        body: {
+          'error': 'invalid_grant',
+          'error_description': 'Authorization code has already been used.',
+        },
+        headers: _headers,
+      );
+    }
 
-    // Issue tokens
-    return _issueTokens(
+    // Build and persist tokens carrying authorizationCode lineage
+    final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: authCode.userId,
       scope: authCode.scope,
       issueRefreshToken: client.allowedGrantTypes.contains('refresh_token'),
+      authorizationCode: authCode.code,
     );
+    final saved = await tokenRepository.saveIssuedTokens(
+      accessToken: pair.accessToken,
+      refreshToken: pair.refreshToken,
+    );
+    if (!saved) {
+      await _revokeCompromisedCodeFamily(
+        code: code,
+        clientId: authCode.clientId,
+        userId: authCode.userId,
+      );
+      return const ServerTokenResponse(
+        statusCode: 400,
+        body: {
+          'error': 'invalid_grant',
+          'error_description': 'Authorization code has already been used.',
+        },
+        headers: _headers,
+      );
+    }
+
+    return pair.response;
   }
 
   Future<ServerTokenResponse> _handleClientCredentials(
@@ -394,12 +441,14 @@ class TokenRequestHandler {
       scope = client.allowedScopes.join(' ');
     }
 
-    return _issueTokens(
+    final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: null,
       scope: scope,
       issueRefreshToken: false,
     );
+    await tokenRepository.saveAccessToken(pair.accessToken);
+    return pair.response;
   }
 
   Future<ServerTokenResponse> _handleRefreshToken(
@@ -445,7 +494,8 @@ class TokenRequestHandler {
       );
     }
 
-    // Replay check: if already revoked, trigger cascading revocation
+    // Replay pre-check: if already revoked and outside grace window (or grace already consumed),
+    // trigger cascading family revocation immediately.
     if (oldRefreshToken.isRevoked) {
       final revokedAt = oldRefreshToken.revokedAt;
       final isWithinGrace =
@@ -453,15 +503,8 @@ class TokenRequestHandler {
           DateTime.now().difference(revokedAt) <= const Duration(seconds: 30);
       final alreadyUsedGrace = oldRefreshToken.usedInGraceWindow;
 
-      if (isWithinGrace && !alreadyUsedGrace) {
-        // Mark as used in grace window to prevent further retries
-        final updatedToken = oldRefreshToken.copyWith(usedInGraceWindow: true);
-        await tokenRepository.saveRefreshToken(updatedToken);
-      } else {
-        await tokenRepository.revokeAllTokensForClientAndUser(
-          oldRefreshToken.clientId,
-          oldRefreshToken.userId,
-        );
+      if (!isWithinGrace || alreadyUsedGrace) {
+        await _revokeCompromisedRefreshFamily(oldRefreshToken);
         return const ServerTokenResponse(
           statusCode: 400,
           body: {
@@ -486,10 +529,7 @@ class TokenRequestHandler {
       );
     }
 
-    // Revoke old refresh token (invalidation)
-    await tokenRepository.revokeRefreshTokenByHash(hashed);
-
-    // Scope validation
+    // Scope validation (MUST run before mutating/revoking oldRefreshToken)
     final requestedScope = body['scope'];
     String? scope;
     if (requestedScope != null && requestedScope.isNotEmpty) {
@@ -513,20 +553,66 @@ class TokenRequestHandler {
       scope = oldRefreshToken.scope;
     }
 
-    return _issueTokens(
+    // Atomically rotate refresh token and persist replacement token pair
+    final pair = _buildTokenPair(
       clientId: client.clientId,
       userId: oldRefreshToken.userId,
       scope: scope,
       issueRefreshToken: true,
+      authorizationCode: oldRefreshToken.authorizationCode,
+    );
+    final rotated = await tokenRepository.rotateRefreshToken(
+      oldTokenHash: hashed,
+      newAccessToken: pair.accessToken,
+      newRefreshToken: pair.refreshToken!,
+    );
+    if (!rotated) {
+      await _revokeCompromisedRefreshFamily(oldRefreshToken);
+      return const ServerTokenResponse(
+        statusCode: 400,
+        body: {
+          'error': 'invalid_grant',
+          'error_description':
+              'Refresh token has already been used. Grant revoked.',
+        },
+        headers: _headers,
+      );
+    }
+
+    return pair.response;
+  }
+
+  Future<void> _revokeCompromisedCodeFamily({
+    required String code,
+    required String clientId,
+    required String? userId,
+  }) async {
+    await tokenRepository.revokeByAuthorizationCode(code);
+    await tokenRepository.revokeAllTokensForClientAndUser(clientId, userId);
+  }
+
+  Future<void> _revokeCompromisedRefreshFamily(RefreshToken token) async {
+    if (token.authorizationCode != null) {
+      await tokenRepository.revokeByAuthorizationCode(token.authorizationCode!);
+    }
+    await tokenRepository.revokeAllTokensForClientAndUser(
+      token.clientId,
+      token.userId,
     );
   }
 
-  Future<ServerTokenResponse> _issueTokens({
+  ({
+    AccessToken accessToken,
+    RefreshToken? refreshToken,
+    ServerTokenResponse response,
+  })
+  _buildTokenPair({
     required String clientId,
     required String? userId,
     required String? scope,
     required bool issueRefreshToken,
-  }) async {
+    String? authorizationCode,
+  }) {
     final rawAccessToken = cryptoService.generateRandomEntropyString();
     final hashedAccessToken = cryptoService.hashString(rawAccessToken);
     final accessExpiresAt = DateTime.now().add(const Duration(hours: 1));
@@ -537,23 +623,24 @@ class TokenRequestHandler {
       expiresAt: accessExpiresAt,
       userId: userId,
       scope: scope,
+      authorizationCode: authorizationCode,
     );
-    await tokenRepository.saveAccessToken(accessTokenEntity);
 
     String? rawRefreshToken;
+    RefreshToken? refreshTokenEntity;
     if (issueRefreshToken) {
       rawRefreshToken = cryptoService.generateRandomEntropyString();
       final hashedRefreshToken = cryptoService.hashString(rawRefreshToken);
       final refreshExpiresAt = DateTime.now().add(const Duration(days: 30));
 
-      final refreshTokenEntity = RefreshToken(
+      refreshTokenEntity = RefreshToken(
         tokenHash: hashedRefreshToken,
         clientId: clientId,
         expiresAt: refreshExpiresAt,
         userId: userId,
         scope: scope,
+        authorizationCode: authorizationCode,
       );
-      await tokenRepository.saveRefreshToken(refreshTokenEntity);
     }
 
     final body = <String, dynamic>{
@@ -568,6 +655,14 @@ class TokenRequestHandler {
       body['scope'] = scope;
     }
 
-    return ServerTokenResponse(statusCode: 200, body: body, headers: _headers);
+    return (
+      accessToken: accessTokenEntity,
+      refreshToken: refreshTokenEntity,
+      response: ServerTokenResponse(
+        statusCode: 200,
+        body: body,
+        headers: _headers,
+      ),
+    );
   }
 }

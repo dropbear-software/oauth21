@@ -282,6 +282,50 @@ void main() {
       );
 
       test(
+        'should reject dangerous redirect URI schemes, malformed dot schemes, and userinfo in redirectUri or authorizationEndpoint',
+        () {
+          for (final badRedirect in [
+            'javascript:alert(1)',
+            'data:text/html,hi',
+            'file:///etc/passwd',
+            'app.:/cb',
+            'com..app:/cb',
+            'https://user:pass@client.example.com/callback',
+          ]) {
+            expect(
+              () => AuthRequest(
+                authorizationEndpoint: authEndpoint,
+                clientId: clientId,
+                redirectUri: Uri.parse(badRedirect),
+                state: stateToken,
+                codeChallenge: codeChallenge,
+              ),
+              throwsArgumentError,
+              reason: 'Expected redirectUri $badRedirect to be rejected',
+            );
+          }
+
+          for (final badEndpoint in [
+            'https://user:pass@auth.example.com/authorize',
+            'https:/authorize',
+          ]) {
+            expect(
+              () => AuthRequest(
+                authorizationEndpoint: badEndpoint,
+                clientId: clientId,
+                redirectUri: redirectUri,
+                state: stateToken,
+                codeChallenge: codeChallenge,
+              ),
+              throwsArgumentError,
+              reason:
+                  'Expected authorizationEndpoint $badEndpoint to be rejected',
+            );
+          }
+        },
+      );
+
+      test(
         'should reject http scheme for fake loopback domains or incorrect subdomains',
         () {
           expect(

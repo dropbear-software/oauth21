@@ -1,7 +1,24 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:shelf/shelf.dart' as shelf;
 import '../domain/services/authorize_request_validator.dart';
 import '../domain/services/token_request_handler.dart';
+
+const Map<String, String> _tokenErrorHeaders = {
+  'Content-Type': 'application/json;charset=UTF-8',
+  'Cache-Control': 'no-store',
+  'Pragma': 'no-cache',
+};
+
+shelf.Response _tokenBadRequest(String description) {
+  return shelf.Response.badRequest(
+    body: jsonEncode({
+      'error': 'invalid_request',
+      'error_description': description,
+    }),
+    headers: _tokenErrorHeaders,
+  );
+}
 
 /// Handles validation of incoming parameters at the authorization endpoint.
 ///
@@ -77,87 +94,67 @@ shelf.Response redirectWithAuthorizationCode({
 Future<shelf.Response> handleTokenRequest(
   shelf.Request request, {
   required TokenRequestHandler handler,
-  bool isHttps = true,
+  bool isHttps = false,
 }) async {
   if (request.method != 'POST') {
-    return shelf.Response.badRequest(
-      body: jsonEncode({
-        'error': 'invalid_request',
-        'error_description': 'HTTP method must be POST.',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-        'Pragma': 'no-cache',
-      },
-    );
+    return _tokenBadRequest('HTTP method must be POST.');
   }
 
   final contentType = request.headers['content-type'] ?? '';
   if (!contentType.contains('application/x-www-form-urlencoded')) {
-    return shelf.Response.badRequest(
-      body: jsonEncode({
-        'error': 'invalid_request',
-        'error_description':
-            'Content-Type must be application/x-www-form-urlencoded.',
-      }),
-      headers: {
-        'Content-Type': 'application/json',
-        'Cache-Control': 'no-store',
-        'Pragma': 'no-cache',
-      },
+    return _tokenBadRequest(
+      'Content-Type must be application/x-www-form-urlencoded.',
     );
   }
 
   // 1. Defend against Heap-Space DoS (Max 10 KB allocation threshold)
+  const maxBodyBytes = 10240;
   final contentLengthHeader = request.headers['content-length'];
   if (contentLengthHeader != null) {
-    final length = int.tryParse(contentLengthHeader) ?? 0;
-    if (length > 10240) {
-      return shelf.Response.badRequest(
-        body: jsonEncode({
-          'error': 'invalid_request',
-          'error_description': 'Payload too large.',
-        }),
-        headers: {'Content-Type': 'application/json'},
-      );
+    final length = int.tryParse(contentLengthHeader.trim());
+    if (length == null || length < 0) {
+      return _tokenBadRequest('Invalid Content-Length header.');
+    }
+    if (length > maxBodyBytes) {
+      return _tokenBadRequest('Payload too large.');
     }
   }
 
-  final bodyStr = await request.readAsString();
-
-  if (bodyStr.length > 10240) {
-    return shelf.Response.badRequest(
-      body: jsonEncode({
-        'error': 'invalid_request',
-        'error_description': 'Payload too large.',
-      }),
-      headers: {'Content-Type': 'application/json'},
-    );
-  }
-
-  // 2. Intercept Body Parameter Pollution before Map flattening
-  final rawPairs = bodyStr.split('&');
-  final seenKeys = <String>{};
-  for (final pair in rawPairs) {
-    if (pair.isEmpty) continue;
-    final eqIndex = pair.indexOf('=');
-    final key = eqIndex != -1
-        ? Uri.decodeQueryComponent(pair.substring(0, eqIndex))
-        : Uri.decodeQueryComponent(pair);
-
-    if (!seenKeys.add(key)) {
-      return shelf.Response.badRequest(
-        body: jsonEncode({
-          'error': 'invalid_request',
-          'error_description': 'Duplicate parameters are prohibited.',
-        }),
-        headers: {'Content-Type': 'application/json'},
-      );
+  final bodyBytes = BytesBuilder(copy: false);
+  await for (final chunk in request.read()) {
+    if (bodyBytes.length + chunk.length > maxBodyBytes) {
+      return _tokenBadRequest('Payload too large.');
     }
+    bodyBytes.add(chunk);
   }
 
-  final body = Uri.splitQueryString(bodyStr);
+  final String bodyStr;
+  final Map<String, String> body;
+  try {
+    bodyStr = utf8.decode(bodyBytes.takeBytes());
+    if (RegExp('%(?![0-9a-fA-F]{2})').hasMatch(bodyStr)) {
+      return _tokenBadRequest('Malformed request body.');
+    }
+
+    // 2. Intercept Body Parameter Pollution before Map flattening
+    final rawPairs = bodyStr.split('&');
+    final seenKeys = <String>{};
+    for (final pair in rawPairs) {
+      if (pair.isEmpty) continue;
+      final eqIndex = pair.indexOf('=');
+      final key = eqIndex != -1
+          ? Uri.decodeQueryComponent(pair.substring(0, eqIndex))
+          : Uri.decodeQueryComponent(pair);
+
+      if (!seenKeys.add(key)) {
+        return _tokenBadRequest('Duplicate parameters are prohibited.');
+      }
+    }
+
+    body = Uri.splitQueryString(bodyStr);
+  } on FormatException catch (_) {
+    return _tokenBadRequest('Malformed request body.');
+  }
 
   final authorizationHeader =
       request.headers['Authorization'] ?? request.headers['authorization'];

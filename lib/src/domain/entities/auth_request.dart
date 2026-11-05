@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import '../redirect_uri_policy.dart';
 import '../value_objects/code_challenge.dart';
 
 /// Represents a front-channel OAuth 2.1 authorization request.
@@ -48,41 +49,26 @@ class AuthRequest {
     this.scope,
     this.customParameters = const {},
   }) {
-    // 1. Validate redirect URI does not contain a fragment and is absolute
-    if (redirectUri.hasFragment) {
-      throw ArgumentError(
-        'Redirect URI must not contain a fragment component (#).',
-      );
-    }
-    if (!redirectUri.isAbsolute) {
-      throw ArgumentError('Redirect URI must be an absolute URI.');
-    }
-
-    // 2. Enforce TLS requirements
-    final endpointUri = Uri.parse(authorizationEndpoint);
-    if (endpointUri.scheme != 'https') {
-      throw ArgumentError(
-        'Security violation: authorizationEndpoint must use the secure "https" scheme. Got: "$authorizationEndpoint".',
+    // 1. Validate redirect URI against OAuth 2.1 redirect URI security policy
+    if (!isAllowedRedirectUri(redirectUri)) {
+      throw ArgumentError.value(
+        redirectUri,
+        'redirectUri',
+        'redirectUri must use https, loopback http, or a reverse-domain '
+            'private-use scheme, and must not contain fragments or userinfo.',
       );
     }
 
-    final redirectScheme = redirectUri.scheme.toLowerCase();
-    if (redirectScheme == 'http') {
-      final host = redirectUri.host;
-      final isLoopback =
-          host == '127.0.0.1' || host == '::1' || host == 'localhost';
-      if (!isLoopback) {
-        throw ArgumentError(
-          'Security violation: redirectUri must use the secure "https" scheme except for loopback interface redirect URIs. Got: "$redirectUri".',
-        );
-      }
-    } else if (redirectScheme != 'https') {
-      if (!redirectScheme.contains('.')) {
-        throw ArgumentError(
-          'Security violation: Private-use redirect URI scheme must contain a period character (.) '
-          'to enforce reverse domain name naming conventions. Got scheme: "${redirectUri.scheme}".',
-        );
-      }
+    // 2. Enforce TLS and authority requirements on authorizationEndpoint
+    final endpointUri = Uri.tryParse(authorizationEndpoint);
+    if (endpointUri == null ||
+        !isAllowedHttpEndpointUri(endpointUri, allowLoopbackHttp: false)) {
+      throw ArgumentError.value(
+        authorizationEndpoint,
+        'authorizationEndpoint',
+        'Security violation: authorizationEndpoint must be a valid https URI '
+            'with a host and no fragment or userinfo. Got: "$authorizationEndpoint".',
+      );
     }
 
     // 3. Enforce scope ABNF syntax: 1*( %x21 / %x23-5B / %x5D-7E )

@@ -1,4 +1,5 @@
 import 'package:meta/meta.dart';
+import '../redirect_uri_policy.dart';
 
 /// Represents the registration profile of an OAuth 2.1 client.
 enum ClientType {
@@ -54,13 +55,13 @@ class ClientRegistration {
 
     // 2. Validate redirect URIs
     for (final uri in this.redirectUris) {
-      if (uri.hasFragment) {
-        throw ArgumentError(
-          'Registration redirect URIs must not contain a fragment component (#).',
+      if (!isAllowedRedirectUri(uri)) {
+        throw ArgumentError.value(
+          uri,
+          'redirectUris',
+          'Each redirectUri must use https, loopback http, or a reverse-domain '
+              'private-use scheme, and must not contain fragments or userinfo.',
         );
-      }
-      if (!uri.isAbsolute) {
-        throw ArgumentError('Registration redirect URIs must be absolute.');
       }
     }
 

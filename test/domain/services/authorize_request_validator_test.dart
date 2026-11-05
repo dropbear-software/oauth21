@@ -80,13 +80,43 @@ void main() {
       expect(result.codeChallengeMethod, equals('S256'));
     });
 
-    test('should validate with code_challenge_method plain', () async {
+    test('should reject code_challenge_method plain (redirectable)', () async {
       final params = createParams(codeChallengeMethod: 'plain');
       final result = await validator.validate(params);
 
-      expect(result.isValid, isTrue);
-      expect(result.codeChallengeMethod, equals('plain'));
+      expect(result.isValid, isFalse);
+      expect(result.isRedirectable, isTrue);
+      expect(result.errorCode, equals('invalid_request'));
+      expect(
+        result.errorDescription,
+        equals('The code_challenge_method must be "S256".'),
+      );
     });
+
+    test(
+      'should reject unsafe or non-reverse-domain redirect_uri schemes (non-redirectable)',
+      () async {
+        for (final badRedirect in [
+          'javascript:alert(1)',
+          'data:text/html,hi',
+          'file:///etc/passwd',
+          'myapp:/cb',
+          '.app:/cb',
+          'com..app:/cb',
+          'http://example.com/cb',
+        ]) {
+          final params = createParams(redirectUri: badRedirect);
+          final result = await validator.validate(params);
+          expect(
+            result.isValid,
+            isFalse,
+            reason: 'Expected $badRedirect to be rejected',
+          );
+          expect(result.isRedirectable, isFalse);
+          expect(result.errorCode, equals('invalid_request'));
+        }
+      },
+    );
 
     test(
       'should default redirectUri if omitted and client has only one',

@@ -322,6 +322,7 @@ void main() {
     test('should append Bearer authorization header to request', () async {
       final mockInner = MockClient((request) async {
         expect(request.headers['Authorization'], equals('Bearer $token'));
+        expect(request.followRedirects, isFalse);
         return http.Response('OK', 200);
       });
 
@@ -331,6 +332,40 @@ void main() {
       );
       expect(response.statusCode, equals(200));
     });
+
+    test(
+      'should reject remote cleartext HTTP, spoofed localhost, userinfo, and fragment URLs while permitting loopback HTTP and disabling followRedirects',
+      () async {
+        final mockInner = MockClient((request) async {
+          expect(request.followRedirects, isFalse);
+          return http.Response('OK', 200);
+        });
+        final authClient = OAuthAuthenticatedClient(mockInner, token);
+
+        for (final badUrl in [
+          'http://api.example.com/resource',
+          'http://localhost.evil.com/resource',
+          'https://user:pass@api.example.com/resource',
+          'https://api.example.com/resource#frag',
+        ]) {
+          expect(
+            () => authClient.get(Uri.parse(badUrl)),
+            throwsArgumentError,
+            reason: 'Expected $badUrl to be rejected',
+          );
+        }
+
+        for (final validUrl in [
+          'https://api.example.com/resource',
+          'http://localhost:8080/resource',
+          'http://127.0.0.1:8080/resource',
+          'http://[::1]:8080/resource',
+        ]) {
+          final res = await authClient.get(Uri.parse(validUrl));
+          expect(res.statusCode, equals(200));
+        }
+      },
+    );
 
     test(
       'should dynamically append the correct token type scheme prefix to the authorization header',

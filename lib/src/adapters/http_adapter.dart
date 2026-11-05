@@ -1,5 +1,6 @@
 import 'package:http/http.dart' as http;
 import '../domain/ports/oauth_http_client.dart';
+import '../domain/redirect_uri_policy.dart';
 
 /// Implementation of the [OAuthHttpClient] port using `package:http`.
 class HttpAdapter implements OAuthHttpClient {
@@ -15,17 +16,13 @@ class HttpAdapter implements OAuthHttpClient {
     Map<String, String> headers = const {},
   }) async {
     // 1. Resolve compliance-safe TLS boundaries (Allow loopback HTTP exceptions)
-    final hostLower = url.host.toLowerCase();
-    final isLoopback =
-        hostLower == 'localhost' ||
-        hostLower == '127.0.0.1' ||
-        hostLower == '::1' ||
-        hostLower == '[::1]';
-
-    if (url.scheme != 'https' && !isLoopback) {
-      throw ArgumentError(
-        'Security violation: Token endpoint must use HTTPS channel security. '
-        'Got "$url".',
+    if (!isAllowedHttpEndpointUri(url)) {
+      throw ArgumentError.value(
+        url,
+        'url',
+        'Security violation: Token endpoint must use HTTPS channel security '
+            '(or loopback HTTP) with a valid host and no userinfo or fragment. '
+            'Got "$url".',
       );
     }
 

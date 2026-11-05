@@ -6,6 +6,7 @@ import 'entities/auth_request.dart';
 import 'entities/token_result.dart';
 import 'ports/oauth_http_client.dart';
 import 'ports/oauth_req_parser.dart';
+import 'redirect_uri_policy.dart';
 import 'value_objects/code_challenge.dart';
 import 'value_objects/code_verifier.dart';
 
@@ -176,6 +177,12 @@ class OAuthClient {
 
 /// An HTTP client wrapper that automatically appends the Bearer token to requests
 /// and enforces OAuth 2.1 resource access security constraints.
+///
+/// Only HTTPS URIs (or loopback HTTP URIs for `localhost`, `127.0.0.1`, `::1`,
+/// and `[::1]`) are permitted. In addition, `request.followRedirects` is
+/// unconditionally set to `false` on every request so that wrapped HTTP clients
+/// never follow a `3xx` redirect to a cleartext or third-party URI with the
+/// `Authorization` header attached.
 class OAuthAuthenticatedClient extends http.BaseClient {
   final http.Client _inner;
   final String _accessToken;
@@ -192,10 +199,22 @@ class OAuthAuthenticatedClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
-    // 1. Enforce query string prohibitions:
+    final url = request.url;
+
+    // 1. Enforce transport security (HTTPS or loopback HTTP only, valid host, no userinfo/fragment)
+    if (!isAllowedHttpEndpointUri(url)) {
+      throw ArgumentError.value(
+        url,
+        'request.url',
+        'OAuthAuthenticatedClient only sends bearer tokens over HTTPS, or HTTP '
+            'to a loopback host (localhost, 127.0.0.1, [::1]), with a valid '
+            'authority and no userinfo or fragment.',
+      );
+    }
+
+    // 2. Enforce query string prohibitions:
     // "Under no circumstances may an access token be appended to a query parameter string.
     // If a URL format contains a token query string, the library must reject the resource request execution loop."
-    final url = request.url;
     for (final values in url.queryParametersAll.values) {
       for (final val in values) {
         if (val.contains(_accessToken)) {
@@ -207,7 +226,10 @@ class OAuthAuthenticatedClient extends http.BaseClient {
       }
     }
 
-    // 2. Enforce Bearer / Token Type Format:
+    // 3. Prevent automatic redirect following to avoid leaking bearer tokens across redirect hops
+    request.followRedirects = false;
+
+    // 4. Enforce Bearer / Token Type Format:
     // Pass tokens strictly via the HTTP Authorization request header utilizing the correct scheme.
     request.headers['Authorization'] = '$tokenType $_accessToken';
 
