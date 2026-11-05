@@ -1,4 +1,5 @@
 import 'dart:convert';
+import '../abnf_validators.dart';
 import '../entities/access_token.dart';
 import '../entities/client_registration.dart';
 import '../entities/refresh_token.dart';
@@ -46,6 +47,13 @@ class TokenRequestHandler {
     'Content-Type': 'application/json',
   };
 
+  static const _unauthorizedHeaders = {
+    ..._headers,
+    'WWW-Authenticate': 'Basic',
+  };
+
+  static final RegExp _basicSchemePrefix = RegExp(r'^[Bb][Aa][Ss][Ii][Cc]\s+');
+
   /// Creates a new [TokenRequestHandler] instance.
   const TokenRequestHandler({
     required this.clientRepository,
@@ -72,39 +80,76 @@ class TokenRequestHandler {
       );
     }
 
+    // Normalize empty parameter values as omitted per Section 3.2 without mutating input map
+    body = {
+      for (final entry in body.entries)
+        if (entry.value.isNotEmpty) entry.key: entry.value,
+    };
+
     // 2. Client Authentication
     String? clientId;
     String? clientSecret;
     var attemptedBasic = false;
     var attemptedBody = false;
 
-    if (authorizationHeader != null &&
-        authorizationHeader.startsWith('Basic ')) {
+    if (authorizationHeader != null && authorizationHeader.trim().isNotEmpty) {
+      final trimmedHeader = authorizationHeader.trim();
+      if (!_basicSchemePrefix.hasMatch(trimmedHeader)) {
+        return const ServerTokenResponse(
+          statusCode: 401,
+          body: {
+            'error': 'invalid_client',
+            'error_description': 'Unsupported Authorization header scheme.',
+          },
+          headers: _unauthorizedHeaders,
+        );
+      }
+
       attemptedBasic = true;
-      final base64Credentials = authorizationHeader.substring(6).trim();
+      final base64Credentials = trimmedHeader
+          .replaceFirst(_basicSchemePrefix, '')
+          .trim();
       try {
         final decoded = utf8.decode(base64.decode(base64Credentials));
         final parts = decoded.split(':');
-        if (parts.length == 2) {
-          clientId = Uri.decodeComponent(parts[0]);
-          clientSecret = Uri.decodeComponent(parts[1]);
+        if (parts.length != 2 || parts[0].isEmpty) {
+          return const ServerTokenResponse(
+            statusCode: 401,
+            body: {
+              'error': 'invalid_client',
+              'error_description': 'Malformed Authorization header.',
+            },
+            headers: _unauthorizedHeaders,
+          );
         }
-      } on Exception catch (_) {
+        clientId = Uri.decodeQueryComponent(parts[0]);
+        clientSecret = Uri.decodeQueryComponent(parts[1]);
+        if (!isValidVscharParam(clientId) ||
+            !vscharOptionalRegex.hasMatch(clientSecret)) {
+          return const ServerTokenResponse(
+            statusCode: 401,
+            body: {
+              'error': 'invalid_client',
+              'error_description':
+                  'Client credentials in Authorization header violate VSCHAR syntax.',
+            },
+            headers: _unauthorizedHeaders,
+          );
+        }
+      } on Object catch (_) {
         return const ServerTokenResponse(
           statusCode: 401,
           body: {
             'error': 'invalid_client',
             'error_description': 'Malformed Authorization header.',
           },
-          headers: _headers,
+          headers: _unauthorizedHeaders,
         );
       }
     }
 
     if (body['client_secret'] != null) {
       attemptedBody = true;
-      clientId = body['client_id'];
-      clientSecret = body['client_secret'];
     }
 
     if (attemptedBasic && attemptedBody) {
@@ -119,7 +164,24 @@ class TokenRequestHandler {
       );
     }
 
-    if (clientId == null && body['client_id'] != null) {
+    if (attemptedBasic &&
+        body['client_id'] != null &&
+        body['client_id'] != clientId) {
+      return const ServerTokenResponse(
+        statusCode: 400,
+        body: {
+          'error': 'invalid_request',
+          'error_description':
+              'Conflicting client_id in Authorization header and request body.',
+        },
+        headers: _headers,
+      );
+    }
+
+    if (attemptedBody) {
+      clientId = body['client_id'];
+      clientSecret = body['client_secret'];
+    } else if (clientId == null && body['client_id'] != null) {
       clientId = body['client_id'];
     }
 
@@ -134,6 +196,19 @@ class TokenRequestHandler {
       );
     }
 
+    if (!isValidVscharParam(clientId) ||
+        (clientSecret != null && !vscharOptionalRegex.hasMatch(clientSecret))) {
+      return const ServerTokenResponse(
+        statusCode: 400,
+        body: {
+          'error': 'invalid_request',
+          'error_description':
+              'Client credentials contain invalid characters or untrimmed whitespace.',
+        },
+        headers: _headers,
+      );
+    }
+
     final client = await clientRepository.findById(clientId);
     if (client == null) {
       return const ServerTokenResponse(
@@ -142,7 +217,7 @@ class TokenRequestHandler {
           'error': 'invalid_client',
           'error_description': 'Client registration not found.',
         },
-        headers: _headers,
+        headers: _unauthorizedHeaders,
       );
     }
 
@@ -155,7 +230,7 @@ class TokenRequestHandler {
             'error': 'invalid_client',
             'error_description': 'Client credentials required.',
           },
-          headers: _headers,
+          headers: _unauthorizedHeaders,
         );
       }
       final registeredHash = client.clientSecretHash;
@@ -167,7 +242,7 @@ class TokenRequestHandler {
             'error': 'invalid_client',
             'error_description': 'Client authentication failed.',
           },
-          headers: _headers,
+          headers: _unauthorizedHeaders,
         );
       }
     } else {
@@ -236,23 +311,25 @@ class TokenRequestHandler {
     final code = body['code'];
     final codeVerifier = body['code_verifier'];
 
-    if (code == null || code.isEmpty) {
+    if (code == null || code.isEmpty || !isValidVscharParam(code)) {
       return const ServerTokenResponse(
         statusCode: 400,
         body: {
           'error': 'invalid_request',
-          'error_description': 'Missing code parameter.',
+          'error_description': 'Missing or malformed code parameter.',
         },
         headers: _headers,
       );
     }
 
-    if (codeVerifier == null || codeVerifier.isEmpty) {
+    if (codeVerifier == null ||
+        codeVerifier.isEmpty ||
+        !codeVerifierAbnfRegex.hasMatch(codeVerifier)) {
       return const ServerTokenResponse(
         statusCode: 400,
         body: {
           'error': 'invalid_request',
-          'error_description': 'Missing code_verifier parameter.',
+          'error_description': 'Missing or malformed code_verifier parameter.',
         },
         headers: _headers,
       );
@@ -283,18 +360,17 @@ class TokenRequestHandler {
       );
     }
 
-    // Enforce strict invariant Redirect URI matching
+    // Per OAuth 2.1 Sections 4.1.3 & 10.2, redirect_uri is optional at /token;
+    // if provided, enforce exact string match against the bound redirectUri.
     final reqRedirectUri = body['redirect_uri'];
-    final parsedUri = reqRedirectUri != null
-        ? Uri.tryParse(reqRedirectUri)
-        : null;
-    if (parsedUri == null || parsedUri != authCode.redirectUri) {
+    if (reqRedirectUri != null &&
+        reqRedirectUri != authCode.redirectUri.toString()) {
       return const ServerTokenResponse(
         statusCode: 400,
         body: {
           'error': 'invalid_grant',
           'error_description':
-              'Redirect URI is required and must match exactly.',
+              'Provided redirect_uri does not match the authorization code.',
         },
         headers: _headers,
       );
@@ -423,8 +499,18 @@ class TokenRequestHandler {
     final requestedScope = body['scope'];
     String? scope;
     if (requestedScope != null && requestedScope.isNotEmpty) {
-      final tokens = requestedScope.split(' ');
-      for (final token in tokens) {
+      final parsedScopes = parseAndDeduplicateScope(requestedScope);
+      if (parsedScopes == null) {
+        return const ServerTokenResponse(
+          statusCode: 400,
+          body: {
+            'error': 'invalid_scope',
+            'error_description': 'Requested scope is malformed.',
+          },
+          headers: _headers,
+        );
+      }
+      for (final token in parsedScopes) {
         if (!client.allowedScopes.contains(token)) {
           return const ServerTokenResponse(
             statusCode: 400,
@@ -436,7 +522,7 @@ class TokenRequestHandler {
           );
         }
       }
-      scope = requestedScope;
+      scope = parsedScopes.join(' ');
     } else {
       scope = client.allowedScopes.join(' ');
     }
@@ -456,12 +542,14 @@ class TokenRequestHandler {
     ClientRegistration client,
   ) async {
     final refreshTokenVal = body['refresh_token'];
-    if (refreshTokenVal == null || refreshTokenVal.isEmpty) {
+    if (refreshTokenVal == null ||
+        refreshTokenVal.isEmpty ||
+        !isValidVscharParam(refreshTokenVal)) {
       return const ServerTokenResponse(
         statusCode: 400,
         body: {
           'error': 'invalid_request',
-          'error_description': 'Missing refresh_token parameter.',
+          'error_description': 'Missing or malformed refresh_token parameter.',
         },
         headers: _headers,
       );
@@ -533,9 +621,19 @@ class TokenRequestHandler {
     final requestedScope = body['scope'];
     String? scope;
     if (requestedScope != null && requestedScope.isNotEmpty) {
+      final parsedScopes = parseAndDeduplicateScope(requestedScope);
+      if (parsedScopes == null) {
+        return const ServerTokenResponse(
+          statusCode: 400,
+          body: {
+            'error': 'invalid_scope',
+            'error_description': 'Requested scope is malformed.',
+          },
+          headers: _headers,
+        );
+      }
       final originalScopes = oldRefreshToken.scope?.split(' ').toSet() ?? {};
-      final tokens = requestedScope.split(' ');
-      for (final token in tokens) {
+      for (final token in parsedScopes) {
         if (!originalScopes.contains(token)) {
           return const ServerTokenResponse(
             statusCode: 400,
@@ -548,7 +646,7 @@ class TokenRequestHandler {
           );
         }
       }
-      scope = requestedScope;
+      scope = parsedScopes.join(' ');
     } else {
       scope = oldRefreshToken.scope;
     }
@@ -560,6 +658,7 @@ class TokenRequestHandler {
       scope: scope,
       issueRefreshToken: true,
       authorizationCode: oldRefreshToken.authorizationCode,
+      refreshExpiresAt: oldRefreshToken.expiresAt,
     );
     final rotated = await tokenRepository.rotateRefreshToken(
       oldTokenHash: hashed,
@@ -612,6 +711,7 @@ class TokenRequestHandler {
     required String? scope,
     required bool issueRefreshToken,
     String? authorizationCode,
+    DateTime? refreshExpiresAt,
   }) {
     final rawAccessToken = cryptoService.generateRandomEntropyString();
     final hashedAccessToken = cryptoService.hashString(rawAccessToken);
@@ -631,12 +731,13 @@ class TokenRequestHandler {
     if (issueRefreshToken) {
       rawRefreshToken = cryptoService.generateRandomEntropyString();
       final hashedRefreshToken = cryptoService.hashString(rawRefreshToken);
-      final refreshExpiresAt = DateTime.now().add(const Duration(days: 30));
+      final effectiveRefreshExpiresAt =
+          refreshExpiresAt ?? DateTime.now().add(const Duration(days: 30));
 
       refreshTokenEntity = RefreshToken(
         tokenHash: hashedRefreshToken,
         clientId: clientId,
-        expiresAt: refreshExpiresAt,
+        expiresAt: effectiveRefreshExpiresAt,
         userId: userId,
         scope: scope,
         authorizationCode: authorizationCode,
