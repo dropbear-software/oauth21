@@ -338,9 +338,7 @@ class InMemoryTokenRepository implements TokenRepository {
       if (!withinGrace) {
         return false;
       }
-      _refreshTokens[oldTokenHash] = existing.copyWith(
-        usedInGraceWindow: true,
-      );
+      _refreshTokens[oldTokenHash] = existing.copyWith(usedInGraceWindow: true);
     }
 
     _accessTokens[newAccessToken.tokenHash] = newAccessToken;

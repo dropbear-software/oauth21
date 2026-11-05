@@ -272,13 +272,16 @@ void main() {
     });
 
     group('Transport Security & Authentication', () {
-      test('should reject non-HTTPS request and default isHttps to false', () async {
-        final resDefault = await handler.handle({
-          'grant_type': 'client_credentials',
-        });
-        expect(resDefault.statusCode, equals(400));
-        expect(resDefault.body['error'], equals('invalid_request'));
-      });
+      test(
+        'should reject non-HTTPS request and default isHttps to false',
+        () async {
+          final resDefault = await handler.handle({
+            'grant_type': 'client_credentials',
+          });
+          expect(resDefault.statusCode, equals(400));
+          expect(resDefault.body['error'], equals('invalid_request'));
+        },
+      );
 
       test('should authenticate via Basic Auth header', () async {
         final authHeader =
@@ -920,8 +923,9 @@ void main() {
           'window exactly once and preserve revokedAt', () async {
         final hash = cryptoService.hashString(rawTokenVal);
         await tokenRepo.revokeRefreshTokenByHash(hash);
-        final originalRevokedAt =
-            (await tokenRepo.findRefreshTokenByHash(hash))?.revokedAt;
+        final originalRevokedAt = (await tokenRepo.findRefreshTokenByHash(
+          hash,
+        ))?.revokedAt;
 
         // First retry (within grace window) should succeed
         final res1 = await handler.handle({

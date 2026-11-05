@@ -1,0 +1,9 @@
+# Security Policy
+
+## Reporting a Vulnerability
+
+Please report security vulnerabilities privately using GitHub's built-in Private Vulnerability Reporting feature:
+
+https://github.com/dropbear-software/oauth21/security/advisories/new
+
+Please do not report security vulnerabilities through public GitHub issues, discussions, or pull requests.

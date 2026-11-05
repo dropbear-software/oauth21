@@ -272,19 +272,23 @@ void main() {
     });
 
     group('handleTokenRequest', () {
-      test('should reject request when isHttps is omitted (defaults to false)', () async {
-        final req = shelf.Request(
-          'POST',
-          Uri.parse('https://auth.example.com/token'),
-          headers: {'content-type': 'application/x-www-form-urlencoded'},
-          body: 'grant_type=client_credentials&client_id=client-123&client_secret=secret-123',
-        );
+      test(
+        'should reject request when isHttps is omitted (defaults to false)',
+        () async {
+          final req = shelf.Request(
+            'POST',
+            Uri.parse('https://auth.example.com/token'),
+            headers: {'content-type': 'application/x-www-form-urlencoded'},
+            body:
+                'grant_type=client_credentials&client_id=client-123&client_secret=secret-123',
+          );
 
-        final res = await handleTokenRequest(req, handler: tokenHandler);
-        expect(res.statusCode, equals(400));
-        expect(res.headers['cache-control'], equals('no-store'));
-        expect(res.headers['pragma'], equals('no-cache'));
-      });
+          final res = await handleTokenRequest(req, handler: tokenHandler);
+          expect(res.statusCode, equals(400));
+          expect(res.headers['cache-control'], equals('no-store'));
+          expect(res.headers['pragma'], equals('no-cache'));
+        },
+      );
 
       test('should reject non-POST request with no-store headers', () async {
         final req = shelf.Request(
